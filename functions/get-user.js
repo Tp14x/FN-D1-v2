@@ -5,18 +5,25 @@ const getCorsHeaders = (origin) => ({
   'Content-Type': 'application/json'
 });
 
-export async function onRequest(context) {
+export async function onRequestOptions() {
+  return new Response('', {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    }
+  });
+}
+
+export async function onRequestGet(context) {
   const { request, env } = context;
   const cors = getCorsHeaders(env.ALLOWED_ORIGIN);
-
-  if (request.method === 'OPTIONS') return new Response('', { status: 200, headers: cors });
-  if (request.method !== 'GET') return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: cors });
 
   try {
     const url = new URL(request.url);
     const requestingUserId = url.searchParams.get('userId');
 
-    // ถ้าเป็น Admin และยังไม่มีใน DB → สร้างให้อัตโนมัติ
     if (requestingUserId && requestingUserId === env.ADMIN_USER_ID) {
       const existing = await env.DB.prepare('SELECT * FROM users WHERE user_id = ?')
         .bind(requestingUserId).first();
@@ -30,7 +37,6 @@ export async function onRequest(context) {
       }
     }
 
-    // ดึงข้อมูล users ทั้งหมด
     const { results } = await env.DB.prepare('SELECT * FROM users').all();
     const userMap = {};
     for (const u of results) {

@@ -9,7 +9,6 @@ const CONFIG = {
     }
 };
 
-
 let markers = [];
 let directionsRenderer;
 let directionsService;
@@ -191,17 +190,7 @@ async function returnCarWithLocation(location) {
         }
     };
 
-    if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
-        try {
-            await liff.shareTargetPicker([shareMessage]);
-        } catch (shareError) {
-        }
-    } else {
-        showNotification('📤 Preview: คืนรถ', 'info');
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
+    // ✅ 1. บันทึกข้อมูลลงฐานข้อมูลก่อน
     try {
         await fetch('/update-return-status', {
             method: 'POST',
@@ -217,6 +206,7 @@ async function returnCarWithLocation(location) {
 
     const carPlateSaved = currentCarUsage.carPlate;
 
+    // ✅ 2. เคลียร์สถานะและเปลี่ยน UI ก่อนแชร์
     currentCarUsage = {
         isUsing: false,
         carPlate: null,
@@ -237,6 +227,17 @@ async function returnCarWithLocation(location) {
         showNormalUI(currentUser);
     } else {
         location.reload();
+    }
+
+    // ✅ 3. แชร์ข้อความหลังจากบันทึกและเปลี่ยน UI แล้ว
+    if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
+        try {
+            await liff.shareTargetPicker([shareMessage]);
+        } catch (shareError) {
+            // ผู้ใช้กด cancel - ไม่เป็นไรเพราะข้อมูลบันทึกแล้ว
+        }
+    } else {
+        showNotification('📤 Preview: คืนรถ', 'info');
     }
 
     return true;
@@ -629,10 +630,7 @@ function showSuccessPopup() {
         if (countdown <= 0) {
             clearInterval(countdownInterval);
             popup.classList.remove("show");
-
-            if (typeof liff !== 'undefined' && liff.isInClient()) {
-                liff.closeWindow();
-            }
+            // ✅ ลบ liff.closeWindow() ออก - ให้อยู่ในหน้าเดิม
         }
     }, 1000);
 
@@ -640,9 +638,7 @@ function showSuccessPopup() {
         clearInterval(countdownInterval);
         if (popup.classList.contains('show')) {
             popup.classList.remove("show");
-            if (typeof liff !== 'undefined' && liff.isInClient()) {
-                liff.closeWindow();
-            }
+            // ✅ ลบ liff.closeWindow() ออก
         }
     }, 3500);
 }
@@ -1613,6 +1609,20 @@ document.getElementById('field-form')?.addEventListener('submit', async function
         };
 
         const sendData = async (photoBase64) => {
+            // ✅ 1. บันทึกข้อมูลลงฐานข้อมูลก่อน
+            const recordWithPhoto = {
+                ...recordData,
+                hasPhoto: !!photoBase64,
+                photoSize: photoBase64 ? photoBase64.length : 0
+            };
+
+            const saved = await saveToDatabase(recordWithPhoto);
+            if (!saved) {
+                showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
+                return false;
+            }
+
+            // ✅ 2. สร้าง Flex Message
             const message = createFlexMessage(
                 recordData.name,
                 recordData.phone,
@@ -1624,31 +1634,19 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 photoBase64
             );
 
-            let shareResult = true;
+            // ✅ 3. แชร์ข้อความหลังจากบันทึกสำเร็จแล้ว
             if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
                 try {
-                    shareResult = await liff.shareTargetPicker([message]);
+                    await liff.shareTargetPicker([message]);
                 } catch (shareError) {
-                    shareResult = false;
+                    // ผู้ใช้กด cancel หรือ error - แต่ข้อมูลบันทึกแล้ว
+                    console.log('Share cancelled:', shareError);
                 }
             } else {
                 showNotification('📤 ข้อมูลพร้อมส่ง (Preview mode)', 'info');
             }
 
-            if (shareResult) {
-                const recordWithPhoto = {
-                    ...recordData,
-                    hasPhoto: !!photoBase64,
-                    photoSize: photoBase64 ? photoBase64.length : 0
-                };
-
-                const saved = await saveToDatabase(recordWithPhoto);
-                if (saved) {
-                } else {
-                }
-            }
-
-            return shareResult;
+            return true;
         };
 
         let result;
@@ -1665,16 +1663,18 @@ document.getElementById('field-form')?.addEventListener('submit', async function
         }
 
         if (result) {
+            // ✅ 4. เปลี่ยน UI หลังจากบันทึกสำเร็จ
             startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
-
             showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
-
+        } else {
+            // ถ้าบันทึกไม่สำเร็จ ให้กลับมาใช้ปุ่มได้
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
         }
 
     } catch (error) {
         updateMapStatus('❌ เกิดข้อผิดพลาด กรุณาลองใหม่', true);
         showNotification('เกิดข้อผิดพลาดในการส่งข้อมูล กรุณาลองอีกครั้ง', 'error');
-    } finally {
         submitBtn.disabled = false;
         submitBtn.innerHTML = originalText;
     }

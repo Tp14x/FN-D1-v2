@@ -1692,14 +1692,6 @@ document.getElementById('field-form')?.addEventListener('submit', async function
     }
 });
 
-    } catch (error) {
-        updateMapStatus('❌ เกิดข้อผิดพลาด กรุณาลองใหม่', true);
-        showNotification('เกิดข้อผิดพลาดในการส่งข้อมูล กรุณาลองอีกครั้ง', 'error');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = originalText;
-    }
-});
-
 async function initializeApp() {
     try {
         showLoading(true);
@@ -1876,7 +1868,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    const carSelect = document.getElementById('car');
+        const carSelect = document.getElementById('car');
     if (carSelect) {
         carSelect.addEventListener('change', (e) => {
             if (e.target.value) {
@@ -1983,3 +1975,4 @@ document.getElementById('register-form')?.addEventListener('submit', async funct
 });
 
 window.onload = initializeApp;
+

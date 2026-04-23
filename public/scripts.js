@@ -1606,68 +1606,66 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                               )
         };
 
-        const sendData = async (photoBase64) => {
-            // ✅ 1. สร้าง Flex Message
-            const message = createFlexMessage(
-                recordData.name,
-                recordData.phone,
-                car,
-                mileage,
-                reason,
-                markers,
-                routeText,
-                photoBase64
-            );
+const sendData = async (photoBase64) => {
+    // ✅ 1. สร้าง Flex Message
+    const message = createFlexMessage(
+        recordData.name,
+        recordData.phone,
+        car,
+        mileage,
+        reason,
+        markers,
+        routeText,
+        photoBase64
+    );
 
-            // ✅ 2. แชร์ก่อน
-            let shareSuccess = true;
-            let userCancelled = false;
+    // ✅ 2. แชร์ก่อน (เหมือนเดิม)
+    let shareSuccess = false;
+    let userCancelled = false;
 
-            if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
-                try {
-                    await liff.shareTargetPicker([message]);
-                    shareSuccess = true;
-                } catch (shareError) {
-                    const errorMsg = String(shareError).toLowerCase();
-                    if (errorMsg.includes('cancel') || errorMsg.includes('abort')) {
-                        userCancelled = true;
-                        shareSuccess = false;
-                    } else {
-                        // network error หรือ error อื่นๆ → บันทึกข้อมูลอยู่ดี
-                        shareSuccess = true;
-                    }
-                }
-            } else {
-                showNotification('📤 Preview: กำลังบันทึกข้อมูล', 'info');
-                shareSuccess = true;
+    if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
+        try {
+            await liff.shareTargetPicker([message]);
+            shareSuccess = true;  // แชร์สำเร็จ
+        } catch (shareError) {
+            const errorMsg = String(shareError).toLowerCase();
+            if (errorMsg.includes('cancel') || errorMsg.includes('abort')) {
+                userCancelled = true;
             }
+            // ✅ ไม่ต้องทำอะไรต่อ - shareSuccess = false คือไม่แชร์
+        }
+    } else {
+        // Preview mode: ไม่มี shareTargetPicker → แชร์สำเร็จโดยอัตโนมัติ
+        showNotification('📤 Preview: กำลังบันทึกข้อมูล', 'info');
+        shareSuccess = true;
+    }
 
-            // ✅ 3. ถ้าแชร์สำเร็จ หรือ preview mode → บันทึกข้อมูล
-            if (shareSuccess) {
-                const recordWithPhoto = {
-                    ...recordData,
-                    hasPhoto: !!photoBase64,
-                    photoSize: photoBase64 ? photoBase64.length : 0
-                };
-
-                const saved = await saveToDatabase(recordWithPhoto);
-                if (saved) {
-                    // ✅ 4. บันทึกสำเร็จ → เปลี่ยน UI
-                    startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
-                    showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
-                    return true;
-                } else {
-                    showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
-                    return false;
-                }
-            } else {
-                // ผู้ใช้กดยกเลิกการแชร์เท่านั้น
-                if (userCancelled) {
-                    showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
-                }
-                return false;
-            }
+    // ✅ 3. บันทึกข้อมูลเฉพาะเมื่อแชร์สำเร็จ
+    if (shareSuccess) {
+        const recordWithPhoto = {
+            ...recordData,
+            hasPhoto: !!photoBase64,
+            photoSize: photoBase64 ? photoBase64.length : 0
         };
+
+        const saved = await saveToDatabase(recordWithPhoto);
+        if (saved) {
+            // ✅ 4. เปลี่ยน UI หลังจากบันทึกสำเร็จ
+            startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
+            showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
+            return true;
+        } else {
+            showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
+            return false;
+        }
+    } else {
+        // ❌ ไม่แชร์ = ไม่บันทึก
+        if (userCancelled) {
+            showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
+        }
+        return false;
+    }
+};
 
         let result;
         if (photoFile) {

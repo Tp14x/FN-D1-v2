@@ -828,7 +828,7 @@
         }, 5000);
     }
 
-        async function checkAdminAccess() {
+    async function checkAdminAccess() {
         showLoading(true);
         try {
             await liff.init({ liffId: CONFIG.liffId });
@@ -874,7 +874,7 @@
         }
     }
 
-        async function loadUsers() {
+    async function loadUsers() {
         showLoading(true);
         try {
             const res = await fetch('/admin-action', {
@@ -884,29 +884,51 @@
             });
             if (!res.ok) throw new Error(`Server error: ${res.status}`);
             const { userMap, requests } = await res.json();
+            
+            // ✅ แก้ไข: ใช้ req.user_id แทน req.userData.userId
             const pendingRequests = (requests || []).filter(req =>
-                req && req.status === 'pending' && req.userData && req.userData.userId
+                req && req.status === 'pending' && req.user_id
             );
+            
             const users = Object.entries(userMap || {}).map(([uid, data]) => ({
-                userId: uid, name: data.name || 'ไม่ระบุชื่อ', phone: data.phone || '',
-                department: data.department || 'ทั่วไป', role: data.role || 'user',
-                status: data.status || 'active', pictureUrl: data.pictureUrl,
-                source: 'mapping', approvedAt: data.approvedAt
+                userId: uid, 
+                name: data.name || 'ไม่ระบุชื่อ', 
+                phone: data.phone || '',
+                department: data.department || 'ทั่วไป', 
+                role: data.role || 'user',
+                status: data.status || 'active', 
+                pictureUrl: data.picture_url,
+                source: 'mapping', 
+                approvedAt: data.approvedAt
             }));
+            
+            // ✅ แก้ไข: ใช้ field โดยตรงจาก request
             pendingRequests.forEach(req => {
-                if (!req?.userData?.userId) return;
-                const uid = req.userData.userId;
+                if (!req?.user_id) return;
+                const uid = req.user_id;
                 if (!users.some(u => u.userId === uid)) {
                     users.push({
                         userId: uid,
-                        name: req.userData.fullName || req.userData.displayName || 'ไม่ระบุชื่อ',
-                        phone: req.userData.phone || '', department: req.userData.department || 'รออนุมัติ',
-                        role: 'pending', status: 'pending', pictureUrl: req.userData.pictureUrl,
-                        requestedAt: req.requestedAt, requestId: req.id,
-                        source: 'request', requestData: req.userData
+                        name: req.full_name || req.display_name || 'ไม่ระบุชื่อ',
+                        phone: req.phone || '', 
+                        department: req.department || 'รออนุมัติ',
+                        role: 'pending', 
+                        status: 'pending', 
+                        pictureUrl: req.picture_url,
+                        requestedAt: req.submitted_at,
+                        requestId: req.id,
+                        source: 'request',
+                        requestData: {
+                            fullName: req.full_name,
+                            phone: req.phone,
+                            department: req.department,
+                            displayName: req.display_name,
+                            pictureUrl: req.picture_url
+                        }
                     });
                 }
             });
+            
             allUsers = users;
             updateStats();
             renderUsers();
@@ -963,15 +985,10 @@
             const isPending = user.status === 'pending';
             const statusClass = user.status === 'active' ? 'active' : (user.status === 'pending' ? 'pending' : 'inactive');
             
+            // ✅ ใช้ข้อมูลจาก user โดยตรง (ถูกต้องแล้ว)
             let fullName = user.name;
             let phone = user.phone || '-';
             let requestedDept = user.department;
-            
-            if (user.source === 'request' && user.requestData) {
-                fullName = user.requestData.fullName || user.name;
-                phone = user.requestData.phone || '-';
-                requestedDept = user.requestData.department || user.department;
-            }
             
             const isCurrentAdmin = (user.userId === currentAdmin?.userId);
             
@@ -1053,7 +1070,7 @@
         document.getElementById('userGrid').innerHTML = html;
     }
 
-        async function approveUser(userId) {
+    async function approveUser(userId) {
         if (!confirm('ยืนยันการอนุมัติผู้ใช้?')) return;
         showLoading(true);
         try {
@@ -1061,9 +1078,11 @@
             const department = deptSelect ? deptSelect.value : 'ทั่วไป';
             const userRequest = allUsers.find(u => u.userId === userId);
             const userData = {
-                name: userRequest?.requestData?.fullName || userRequest?.name || 'พนักงานใหม่',
-                phone: userRequest?.requestData?.phone || userRequest?.phone || '',
-                department, role: 'user', status: 'active',
+                name: userRequest?.name || 'พนักงานใหม่',
+                phone: userRequest?.phone || '',
+                department, 
+                role: 'user', 
+                status: 'active',
                 approvedBy: currentAdmin?.name || 'Admin',
                 pictureUrl: userRequest?.pictureUrl || null
             };
@@ -1081,7 +1100,7 @@
         }
     }
 
-        async function rejectUser(userId) {
+    async function rejectUser(userId) {
         if (!confirm('ยืนยันการปฏิเสธผู้ใช้?')) return;
         showLoading(true);
         try {
@@ -1116,7 +1135,7 @@
         document.getElementById('editModal').classList.remove('show');
     }
 
-        async function saveUserEdit() {
+    async function saveUserEdit() {
         const userId = document.getElementById('editUserId').value;
         const userData = {
             name: document.getElementById('editName').value,
@@ -1142,7 +1161,7 @@
         }
     }
 
-        async function toggleUserStatus(userId) {
+    async function toggleUserStatus(userId) {
         const user = allUsers.find(u => u.userId === userId);
         if (!user) return;
         const actionText = user.status === 'active' ? 'ระงับการใช้งาน' : 'เปิดใช้งาน';

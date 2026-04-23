@@ -5,7 +5,7 @@ const getCorsHeaders = (origin) => ({
   'Content-Type': 'application/json'
 });
 
-export async function onRequest(context) {
+export async function onRequestPost(context) {
   const { request, env } = context;
   const cors = getCorsHeaders(env.ALLOWED_ORIGIN);
 

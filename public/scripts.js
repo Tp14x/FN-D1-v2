@@ -1609,20 +1609,7 @@ document.getElementById('field-form')?.addEventListener('submit', async function
         };
 
         const sendData = async (photoBase64) => {
-            // ✅ 1. บันทึกข้อมูลลงฐานข้อมูลก่อน
-            const recordWithPhoto = {
-                ...recordData,
-                hasPhoto: !!photoBase64,
-                photoSize: photoBase64 ? photoBase64.length : 0
-            };
-
-            const saved = await saveToDatabase(recordWithPhoto);
-            if (!saved) {
-                showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
-                return false;
-            }
-
-            // ✅ 2. สร้าง Flex Message
+            // ✅ 1. สร้าง Flex Message
             const message = createFlexMessage(
                 recordData.name,
                 recordData.phone,
@@ -1634,19 +1621,45 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 photoBase64
             );
 
-            // ✅ 3. แชร์ข้อความหลังจากบันทึกสำเร็จแล้ว
+            // ✅ 2. แชร์ก่อน
+            let shareSuccess = true;
             if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
                 try {
                     await liff.shareTargetPicker([message]);
+                    shareSuccess = true;
                 } catch (shareError) {
-                    // ผู้ใช้กด cancel หรือ error - แต่ข้อมูลบันทึกแล้ว
+                    // ผู้ใช้กด cancel หรือ error
                     console.log('Share cancelled:', shareError);
+                    shareSuccess = false;
                 }
             } else {
-                showNotification('📤 ข้อมูลพร้อมส่ง (Preview mode)', 'info');
+                showNotification('📤 Preview: กำลังบันทึกข้อมูล', 'info');
+                shareSuccess = true; // Preview mode ถือว่าสำเร็จ
             }
 
-            return true;
+            // ✅ 3. ถ้าแชร์สำเร็จ (หรือ preview mode) ค่อยบันทึกข้อมูล
+            if (shareSuccess) {
+                const recordWithPhoto = {
+                    ...recordData,
+                    hasPhoto: !!photoBase64,
+                    photoSize: photoBase64 ? photoBase64.length : 0
+                };
+
+                const saved = await saveToDatabase(recordWithPhoto);
+                if (saved) {
+                    // ✅ 4. บันทึกสำเร็จ → เปลี่ยน UI
+                    startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
+                    showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
+                    return true;
+                } else {
+                    showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
+                    return false;
+                }
+            } else {
+                // ผู้ใช้กด cancel การแชร์
+                showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
+                return false;
+            }
         };
 
         let result;
@@ -1662,15 +1675,22 @@ document.getElementById('field-form')?.addEventListener('submit', async function
             result = await sendData(null);
         }
 
-        if (result) {
-            // ✅ 4. เปลี่ยน UI หลังจากบันทึกสำเร็จ
-            startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
-            showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
-        } else {
-            // ถ้าบันทึกไม่สำเร็จ ให้กลับมาใช้ปุ่มได้
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
+        // ✅ เปิดปุ่มอีกครั้ง (แต่ถ้าบันทึกสำเร็จ UI จะเปลี่ยนไปแล้ว)
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+
+        if (!result) {
+            // ถ้าไม่สำเร็จ ให้เคลียร์ loading
+            showLoading(false);
         }
+
+    } catch (error) {
+        updateMapStatus('❌ เกิดข้อผิดพลาด กรุณาลองใหม่', true);
+        showNotification('เกิดข้อผิดพลาดในการส่งข้อมูล กรุณาลองอีกครั้ง', 'error');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+    }
+});
 
     } catch (error) {
         updateMapStatus('❌ เกิดข้อผิดพลาด กรุณาลองใหม่', true);

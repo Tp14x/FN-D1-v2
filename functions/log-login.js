@@ -5,19 +5,21 @@ const getCorsHeaders = (origin) => ({
   'Content-Type': 'application/json'
 });
 
+export async function onRequestOptions() {
+  return new Response('', {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    }
+  });
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
   const cors = getCorsHeaders(env.ALLOWED_ORIGIN);
 
-  if (request.method === 'OPTIONS') return new Response('', { status: 200, headers: cors });
-  if (request.method === 'GET') {
-    return new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: cors });
-  }
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: cors });
-  }
-
-  // log-login รับข้อมูลแต่ไม่บล็อก — ตอบกลับทันทีไม่ต้องรอ write
   context.waitUntil((async () => {
     try {
       const loginData = await request.clone().json();
@@ -31,4 +33,10 @@ export async function onRequestPost(context) {
   })());
 
   return new Response(JSON.stringify({ success: true }), { status: 200, headers: cors });
+}
+
+export async function onRequestGet(context) {
+  const { env } = context;
+  const cors = getCorsHeaders(env.ALLOWED_ORIGIN);
+  return new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: cors });
 }

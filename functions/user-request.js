@@ -5,24 +5,20 @@ const getCorsHeaders = (origin) => ({
   'Content-Type': 'application/json'
 });
 
+export async function onRequestOptions() {
+  return new Response('', {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    }
+  });
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
   const cors = getCorsHeaders(env.ALLOWED_ORIGIN);
-
-  if (request.method === 'OPTIONS') return new Response('', { status: 200, headers: cors });
-
-  if (request.method === 'GET') {
-    try {
-      const { results } = await env.DB.prepare(
-        "SELECT * FROM requests ORDER BY submitted_at DESC"
-      ).all();
-      return new Response(JSON.stringify(results), { status: 200, headers: cors });
-    } catch (_) {
-      return new Response(JSON.stringify([]), { status: 200, headers: cors });
-    }
-  }
-
-  if (request.method !== 'POST') return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: cors });
 
   try {
     const { action, userId, displayName, pictureUrl, formData } = await request.json();
@@ -60,5 +56,18 @@ export async function onRequestPost(context) {
     return new Response(JSON.stringify({ error: 'Invalid action' }), { status: 400, headers: cors });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: cors });
+  }
+}
+
+export async function onRequestGet(context) {
+  const { env } = context;
+  const cors = getCorsHeaders(env.ALLOWED_ORIGIN);
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM requests ORDER BY submitted_at DESC"
+    ).all();
+    return new Response(JSON.stringify(results), { status: 200, headers: cors });
+  } catch (_) {
+    return new Response(JSON.stringify([]), { status: 200, headers: cors });
   }
 }

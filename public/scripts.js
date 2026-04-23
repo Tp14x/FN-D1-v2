@@ -630,7 +630,6 @@ function showSuccessPopup() {
         if (countdown <= 0) {
             clearInterval(countdownInterval);
             popup.classList.remove("show");
-            // ✅ ลบ liff.closeWindow() ออก - ให้อยู่ในหน้าเดิม
         }
     }, 1000);
 
@@ -638,7 +637,6 @@ function showSuccessPopup() {
         clearInterval(countdownInterval);
         if (popup.classList.contains('show')) {
             popup.classList.remove("show");
-            // ✅ ลบ liff.closeWindow() ออก
         }
     }, 3500);
 }
@@ -1623,21 +1621,28 @@ document.getElementById('field-form')?.addEventListener('submit', async function
 
             // ✅ 2. แชร์ก่อน
             let shareSuccess = true;
+            let userCancelled = false;
+
             if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
                 try {
                     await liff.shareTargetPicker([message]);
                     shareSuccess = true;
                 } catch (shareError) {
-                    // ผู้ใช้กด cancel หรือ error
-                    console.log('Share cancelled:', shareError);
-                    shareSuccess = false;
+                    const errorMsg = String(shareError).toLowerCase();
+                    if (errorMsg.includes('cancel') || errorMsg.includes('abort')) {
+                        userCancelled = true;
+                        shareSuccess = false;
+                    } else {
+                        // network error หรือ error อื่นๆ → บันทึกข้อมูลอยู่ดี
+                        shareSuccess = true;
+                    }
                 }
             } else {
                 showNotification('📤 Preview: กำลังบันทึกข้อมูล', 'info');
-                shareSuccess = true; // Preview mode ถือว่าสำเร็จ
+                shareSuccess = true;
             }
 
-            // ✅ 3. ถ้าแชร์สำเร็จ (หรือ preview mode) ค่อยบันทึกข้อมูล
+            // ✅ 3. ถ้าแชร์สำเร็จ หรือ preview mode → บันทึกข้อมูล
             if (shareSuccess) {
                 const recordWithPhoto = {
                     ...recordData,
@@ -1656,8 +1661,10 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                     return false;
                 }
             } else {
-                // ผู้ใช้กด cancel การแชร์
-                showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
+                // ผู้ใช้กดยกเลิกการแชร์เท่านั้น
+                if (userCancelled) {
+                    showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
+                }
                 return false;
             }
         };
@@ -1680,7 +1687,6 @@ document.getElementById('field-form')?.addEventListener('submit', async function
         submitBtn.innerHTML = originalText;
 
         if (!result) {
-            // ถ้าไม่สำเร็จ ให้เคลียร์ loading
             showLoading(false);
         }
 
@@ -1868,7 +1874,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-        const carSelect = document.getElementById('car');
+    const carSelect = document.getElementById('car');
     if (carSelect) {
         carSelect.addEventListener('change', (e) => {
             if (e.target.value) {
@@ -1975,4 +1981,3 @@ document.getElementById('register-form')?.addEventListener('submit', async funct
 });
 
 window.onload = initializeApp;
-

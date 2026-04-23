@@ -455,7 +455,7 @@ async function updateUserProfilePicture() {
     if (!currentUser || !currentUser.userId) return;
     try {
         const profile = await liff.getProfile();
-        await fetch('/functions/update-user', {
+        await fetch('/update-user', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId: currentUser.userId, pictureUrl: profile.pictureUrl })
@@ -465,7 +465,7 @@ async function updateUserProfilePicture() {
 
 async function loadUserData(userId) {
     try {
-        const url = userId ? `/functions/get-user?userId=${encodeURIComponent(userId)}` : '/functions/get-user';
+        const url = userId ? `/get-user?userId=${encodeURIComponent(userId)}` : '/get-user';
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
         return await response.json();
@@ -476,7 +476,7 @@ async function loadUserData(userId) {
 
 async function requestNewUserApproval(userData) {
     try {
-        const res = await fetch('/functions/user-request', {
+        const res = await fetch('/user-request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'request', ...userData })
@@ -542,7 +542,7 @@ function cancelRegistration() {
 
 async function checkExistingRequest(userId) {
     try {
-        const res = await fetch('/functions/user-request', {
+        const res = await fetch('/user-request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'check', userId })
@@ -556,7 +556,7 @@ async function checkExistingRequest(userId) {
 
 async function submitRegistration(userId, displayName, pictureUrl, formData) {
     try {
-        const res = await fetch('/functions/user-request', {
+        const res = await fetch('/user-request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'submit', userId, displayName, pictureUrl, formData })
@@ -649,7 +649,7 @@ function showSuccessPopup() {
 
 async function callNetlifyFunction(functionName, data) {
     try {
-        const response = await fetch(`/functions/${functionName}`, {
+        const response = await fetch(`/${functionName}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1487,7 +1487,7 @@ function createFlexMessage(name, phone, car, mileage, reason, markers, routeText
 
 async function saveToDatabase(recordData) {
     try {
-        const response = await fetch('/functions/save-record', {
+        const response = await fetch('/save-record', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

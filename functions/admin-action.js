@@ -41,13 +41,33 @@ export async function onRequestPost(context) {
     if (action === 'approve') {
       const { userId, userData } = body;
       const now = new Date().toISOString();
+      
+      // ✅ ใช้ INSERT ... ON CONFLICT (Upsert)
       await env.DB.prepare(`
-        UPDATE users SET name=?, phone=?, department=?, role='user', status='active', updated_at=?
-        WHERE user_id=?
-      `).bind(userData.name, userData.phone, userData.department, now, userId).run();
+        INSERT INTO users (user_id, name, phone, department, role, status, picture_url, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'user', 'active', ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          name = excluded.name,
+          phone = excluded.phone,
+          department = excluded.department,
+          role = 'user',
+          status = 'active',
+          picture_url = excluded.picture_url,
+          updated_at = excluded.updated_at
+      `).bind(
+        userId,
+        userData.name || 'ไม่ระบุชื่อ',
+        userData.phone || '',
+        userData.department || 'ทั่วไป',
+        userData.pictureUrl || null,
+        now,
+        now
+      ).run();
+      
       await env.DB.prepare(
         "UPDATE requests SET status='approved' WHERE user_id=?"
       ).bind(userId).run();
+      
       return new Response(JSON.stringify({ success: true }), { status: 200, headers: cors });
     }
 

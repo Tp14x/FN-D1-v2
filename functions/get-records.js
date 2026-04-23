@@ -5,12 +5,20 @@ const getCorsHeaders = (origin) => ({
   'Content-Type': 'application/json'
 });
 
-export async function onRequest(context) {
-  const { request, env } = context;
-  const cors = getCorsHeaders(env.ALLOWED_ORIGIN);
+export async function onRequestOptions() {
+  return new Response('', {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    }
+  });
+}
 
-  if (request.method === 'OPTIONS') return new Response('', { status: 200, headers: cors });
-  if (request.method !== 'GET') return new Response('Method Not Allowed', { status: 405, headers: cors });
+export async function onRequestGet(context) {
+  const { env } = context;
+  const cors = getCorsHeaders(env.ALLOWED_ORIGIN);
 
   try {
     const { results } = await env.DB.prepare(`

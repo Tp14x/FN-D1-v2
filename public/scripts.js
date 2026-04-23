@@ -203,7 +203,7 @@ async function returnCarWithLocation(location) {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     try {
-        await fetch('/functions/update-return-status', {
+        await fetch('/update-return-status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

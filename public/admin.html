@@ -874,71 +874,72 @@
         }
     }
 
-    async function loadUsers() {
-        showLoading(true);
-        try {
-            const res = await fetch('/admin-action', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'load', requestingUserId: currentAdmin?.userId })
-            });
-            if (!res.ok) throw new Error(`Server error: ${res.status}`);
-            const { userMap, requests } = await res.json();
-            
-            // ✅ แก้ไข: ใช้ req.user_id แทน req.userData.userId
-            const pendingRequests = (requests || []).filter(req =>
-                req && req.status === 'pending' && req.user_id
-            );
-            
-            const users = Object.entries(userMap || {}).map(([uid, data]) => ({
-                userId: uid, 
-                name: data.name || 'ไม่ระบุชื่อ', 
-                phone: data.phone || '',
-                department: data.department || 'ทั่วไป', 
-                role: data.role || 'user',
-                status: data.status || 'active', 
-                pictureUrl: data.picture_url,
-                source: 'mapping', 
-                approvedAt: data.approvedAt
-            }));
-            
-            // ✅ แก้ไข: ใช้ field โดยตรงจาก request
-            pendingRequests.forEach(req => {
-                if (!req?.user_id) return;
-                const uid = req.user_id;
-                if (!users.some(u => u.userId === uid)) {
-                    users.push({
-                        userId: uid,
-                        name: req.full_name || req.display_name || 'ไม่ระบุชื่อ',
-                        phone: req.phone || '', 
-                        department: req.department || 'รออนุมัติ',
-                        role: 'pending', 
-                        status: 'pending', 
-                        pictureUrl: req.picture_url,
-                        requestedAt: req.submitted_at,
-                        requestId: req.id,
-                        source: 'request',
-                        requestData: {
-                            fullName: req.full_name,
-                            phone: req.phone,
-                            department: req.department,
-                            displayName: req.display_name,
-                            pictureUrl: req.picture_url
-                        }
-                    });
-                }
-            });
-            
-            allUsers = users;
-            updateStats();
-            renderUsers();
-        } catch (error) {
-            document.getElementById('userGrid').innerHTML = `<div style="text-align:center;color:#e74c3c;padding:50px;grid-column:1/-1;"><i class="fas fa-exclamation-circle" style="font-size:40px;margin-bottom:15px;"></i><p>เกิดข้อผิดพลาด: ${error.message}</p></div>`;
-            showNotification('Error', 'ไม่สามารถโหลดข้อมูลได้: ' + error.message, 'error');
-        } finally {
-            showLoading(false);
-        }
+async function loadUsers() {
+    showLoading(true);
+    try {
+        const res = await fetch('/admin-action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'load', requestingUserId: currentAdmin?.userId })
+        });
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        const { userMap, requests } = await res.json();
+        
+        // ✅ สร้าง users จาก userMap (ข้อมูลที่ถูกอนุมัติแล้ว)
+        const users = Object.entries(userMap || {}).map(([uid, data]) => ({
+            userId: uid, 
+            name: data.name || 'ไม่ระบุชื่อ', 
+            phone: data.phone || '',
+            department: data.department || 'ทั่วไป', 
+            role: data.role || 'user',
+            status: data.status || 'active', 
+            pictureUrl: data.picture_url,
+            source: 'mapping', 
+            approvedAt: data.approvedAt
+        }));
+        
+        // ✅ เพิ่ม pending requests (จาก requests table)
+        const pendingRequests = (requests || []).filter(req =>
+            req && req.status === 'pending' && req.user_id
+        );
+        
+        pendingRequests.forEach(req => {
+            if (!req?.user_id) return;
+            const uid = req.user_id;
+            // ✅ ตรวจสอบว่าผู้ใช้ยังไม่ถูกเพิ่มจาก userMap
+            if (!users.some(u => u.userId === uid)) {
+                users.push({
+                    userId: uid,
+                    name: req.full_name || req.display_name || 'ไม่ระบุชื่อ',
+                    phone: req.phone || '', 
+                    department: req.department || 'รออนุมัติ',
+                    role: 'pending', 
+                    status: 'pending', 
+                    pictureUrl: req.picture_url,
+                    requestedAt: req.submitted_at,
+                    requestId: req.id,
+                    source: 'request',
+                    requestData: {
+                        fullName: req.full_name,
+                        phone: req.phone,
+                        department: req.department,
+                        displayName: req.display_name,
+                        pictureUrl: req.picture_url
+                    }
+                });
+            }
+        });
+        
+        allUsers = users;
+        updateStats();
+        renderUsers();
+    } catch (error) {
+        document.getElementById('userGrid').innerHTML = `<div style="text-align:center;color:#e74c3c;padding:50px;grid-column:1/-1;"><i class="fas fa-exclamation-circle" style="font-size:40px;margin-bottom:15px;"></i><p>เกิดข้อผิดพลาด: ${error.message}</p></div>`;
+        showNotification('Error', 'ไม่สามารถโหลดข้อมูลได้: ' + error.message, 'error');
+    } finally {
+        showLoading(false);
     }
+}
 
     function updateStats() {
         const total = allUsers.length;

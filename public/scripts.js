@@ -38,7 +38,9 @@ function loadCarUsageState() {
     if (saved) {
         try {
             currentCarUsage = JSON.parse(saved);
-        } catch(e) {}
+        } catch(e) {
+            localStorage.removeItem(CAR_USAGE_KEY);
+        }
     }
 }
 
@@ -100,6 +102,30 @@ function startUsingCar(carPlate, carModel, userName, userId, mileage) {
     };
     saveCarUsageState();
     showCarInUseScreen();
+}
+
+// ✅ ฟังก์ชันใหม่ ─ ยกเลิกการใช้รถ (กรณีค้าง)
+function cancelCarUsage() {
+    if (confirm('คุณแน่ใจหรือไม่ว่าต้องการยกเลิกการใช้รถ? ข้อมูลการใช้รถนี้จะไม่ถูกบันทึก')) {
+        currentCarUsage = {
+            isUsing: false,
+            carPlate: null,
+            startedAt: null,
+            userName: null,
+            userId: null,
+            carModel: null,
+            mileage: null
+        };
+        saveCarUsageState();
+        
+        const carInUseScreen = document.getElementById('carInUseScreen');
+        if (carInUseScreen) carInUseScreen.style.display = 'none';
+        
+        if (currentUser) {
+            showNormalUI(currentUser);
+        }
+        showNotification('✅ ยกเลิกการใช้รถแล้ว', 'success');
+    }
 }
 
 async function processReturnCar(data) {
@@ -408,6 +434,24 @@ function showCarInUseScreen() {
                 <i class="fas fa-undo-alt"></i>
                 คืนรถ (ต้องดึงตำแหน่งก่อน)
             </button>
+
+            <!-- ✅ ปุ่มยกเลิกการใช้รถ (กรณีค้าง) -->
+            <button onclick="cancelCarUsage()" style="
+                background: #95a5a6;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 50px;
+                font-size: 14px;
+                font-weight: 500;
+                width: 100%;
+                cursor: pointer;
+                margin-top: 10px;
+                font-family: 'Kanit', sans-serif;
+            ">
+                <i class="fas fa-times"></i> ยกเลิกการใช้รถ (ไม่ได้ใช้จริง)
+            </button>
+
             <p style="color: #7f8c8d; font-size: 12px; margin-top: 20px;">
                 ⚠️ กรุณากด "ดึงตำแหน่งปัจจุบัน" ก่อนคืนรถ
             </p>
@@ -1588,7 +1632,6 @@ document.getElementById('field-form')?.addEventListener('submit', async function
     const originalText = submitBtn.innerHTML;
 
     try {
-        // ✅ 1. อย่า disable ปุ่มก่อน shareTargetPicker
         const name = currentUser?.mappedName || currentUser?.displayName || 'ไม่ระบุชื่อ';
         const phone = currentUser?.phone || 'ไม่มีเบอร์';
         const car = document.getElementById("car")?.value;
@@ -1626,7 +1669,7 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                               )
         };
 
-        // ✅ 2. อ่านรูปก่อน (ถ้ามี)
+        // ✅ อ่านรูปก่อน (ถ้ามี)
         let photoBase64 = null;
         if (photoFile) {
             photoBase64 = await new Promise((resolve) => {
@@ -1636,13 +1679,13 @@ document.getElementById('field-form')?.addEventListener('submit', async function
             });
         }
 
-        // ✅ 3. สร้าง Flex Message
+        // ✅ สร้าง Flex Message
         const message = createFlexMessage(
             recordData.name, recordData.phone, car, mileage, reason,
             markers, routeText, photoBase64
         );
 
-        // ✅ 4. เรียก shareTargetPicker โดยตรง (ยังเป็น user gesture)
+        // ✅ เรียก shareTargetPicker โดยตรง (ยังเป็น user gesture)
         let shareSuccess = false;
         if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
             try {
@@ -1657,7 +1700,7 @@ document.getElementById('field-form')?.addEventListener('submit', async function
             shareSuccess = true;
         }
 
-        // ✅ 5. กลับมาจาก picker → disable ปุ่ม + บันทึกข้อมูล
+        // ✅ กลับมาจาก picker → disable ปุ่ม + บันทึกข้อมูล
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึก...';
 
@@ -1693,6 +1736,22 @@ document.getElementById('field-form')?.addEventListener('submit', async function
 async function initializeApp() {
     try {
         showLoading(true);
+
+        // ✅ ล้างสถานะการใช้รถที่ค้างเก่าเกิน 24 ชั่วโมง
+        const savedUsage = localStorage.getItem(CAR_USAGE_KEY);
+        if (savedUsage) {
+            try {
+                const usage = JSON.parse(savedUsage);
+                if (usage.isUsing && usage.startedAt) {
+                    const hoursSinceStart = (Date.now() - new Date(usage.startedAt).getTime()) / 3600000;
+                    if (hoursSinceStart > 24) {
+                        localStorage.removeItem(CAR_USAGE_KEY);
+                    }
+                }
+            } catch(e) {
+                localStorage.removeItem(CAR_USAGE_KEY);
+            }
+        }
 
         loadCarUsageState();
 

@@ -192,7 +192,7 @@ async function returnCarWithLocation(location) {
 
     const carPlateSaved = currentCarUsage.carPlate;
 
-    // ✅ 1. แชร์ก่อน (ถ้าทำได้)
+    // ✅ 1. แชร์ก่อน (redirect ไป shareTargetPicker)
     let shareSuccess = true;
     if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
         try {
@@ -200,15 +200,11 @@ async function returnCarWithLocation(location) {
             shareSuccess = true;
         } catch (shareError) {
             const errorMsg = String(shareError).toLowerCase();
-            if (errorMsg.includes('cancel') || errorMsg.includes('abort')) {
-                shareSuccess = false;
-            } else {
-                shareSuccess = true; // error อื่น → ยังบันทึกข้อมูล
-            }
+            shareSuccess = !(errorMsg.includes('cancel') || errorMsg.includes('abort'));
         }
     }
 
-    // ✅ 2. ถ้าแชร์สำเร็จ (หรือ preview mode) → บันทึกข้อมูล
+    // ✅ 2. กลับมาจากแชร์ → บันทึกข้อมูล (หน้าโหลดใหม่แล้วก็ยังทำงานได้)
     if (shareSuccess) {
         try {
             await fetch('/update-return-status', {
@@ -223,7 +219,7 @@ async function returnCarWithLocation(location) {
             });
         } catch (_) {}
 
-        // ✅ 3. เปลี่ยน UI หลังจากบันทึก
+        // ✅ 3. เปลี่ยน UI
         currentCarUsage = {
             isUsing: false,
             carPlate: null,
@@ -323,7 +319,6 @@ function showCarInUseScreen() {
                 <p style="margin: 8px 0;"><strong>📍 ไมล์เริ่มต้น:</strong> ${currentCarUsage.mileage}</p>
             </div>
 
-            <!-- 📍 ส่วนแสดงตำแหน่งคืนรถ -->
             <div style="
                 background: #e8f5e9;
                 border-radius: 16px;
@@ -1629,7 +1624,23 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 photoBase64
             );
 
-            // ✅ 2. แชร์ก่อน → redirect ไปหน้าเลือกแชร์ LINE
+            // ✅ 2. เก็บข้อมูลลง localStorage เผื่อหน้าโหลดใหม่
+            const pendingSave = {
+                recordData: {
+                    ...recordData,
+                    hasPhoto: !!photoBase64,
+                    photoSize: photoBase64 ? photoBase64.length : 0
+                },
+                carPlate,
+                carModel,
+                name,
+                userId: currentUser?.userId,
+                mileage,
+                timestamp: Date.now()
+            };
+            localStorage.setItem('pending_save', JSON.stringify(pendingSave));
+
+            // ✅ 3. แชร์ → redirect ไป shareTargetPicker
             let shareSuccess = false;
             let userCancelled = false;
 
@@ -1641,6 +1652,8 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                     const errorMsg = String(shareError).toLowerCase();
                     if (errorMsg.includes('cancel') || errorMsg.includes('abort')) {
                         userCancelled = true;
+                    } else {
+                        shareSuccess = true; // error อื่น → ถือว่าแชร์สำเร็จ
                     }
                 }
             } else {
@@ -1648,17 +1661,11 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 shareSuccess = true;
             }
 
-            // ✅ 3. กลับมาจากแชร์แล้ว → บันทึกข้อมูล
+            // ✅ 4. กลับมาจากแชร์ → บันทึกข้อมูล
             if (shareSuccess) {
-                const recordWithPhoto = {
-                    ...recordData,
-                    hasPhoto: !!photoBase64,
-                    photoSize: photoBase64 ? photoBase64.length : 0
-                };
-
-                const saved = await saveToDatabase(recordWithPhoto);
+                const saved = await saveToDatabase(pendingSave.recordData);
                 if (saved) {
-                    // ✅ 4. เปลี่ยน UI หลังจากบันทึกสำเร็จ
+                    localStorage.removeItem('pending_save');
                     startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
                     showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
                     return true;
@@ -1667,6 +1674,7 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                     return false;
                 }
             } else {
+                localStorage.removeItem('pending_save');
                 if (userCancelled) {
                     showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
                 }
@@ -1708,9 +1716,31 @@ async function initializeApp() {
 
         loadCarUsageState();
 
+        // ✅ ตรวจสอบว่ามี pending save จากการแชร์ที่ยังไม่ได้บันทึกหรือไม่
+        const pendingSave = localStorage.getItem('pending_save');
+        if (pendingSave) {
+            try {
+                const data = JSON.parse(pendingSave);
+                // ตรวจสอบว่าไม่เก่าเกิน 5 นาที
+                if (Date.now() - data.timestamp < 300000) {
+                    const saved = await saveToDatabase(data.recordData);
+                    if (saved) {
+                        localStorage.removeItem('pending_save');
+                        startUsingCar(data.carPlate, data.carModel, data.name, data.userId, data.mileage);
+                        showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${data.carPlate}`, 'success');
+                        showLoading(false);
+                        return;
+                    }
+                } else {
+                    localStorage.removeItem('pending_save');
+                }
+            } catch (e) {
+                localStorage.removeItem('pending_save');
+            }
+        }
+
         const env = checkEnvironment();
 
-        // เริ่มโหลดแผนที่พร้อมกับ LIFF ไม่ต้องรอทีละอัน
         const mapPromise = initMap();
 
         if (typeof liff !== 'undefined') {
@@ -1757,7 +1787,6 @@ async function initializeApp() {
 
                 currentUser = userData;
 
-                // รันพร้อมกันโดยไม่บล็อก UI
                 Promise.all([
                     callNetlifyFunction('log-login', userData),
                     updateUserProfilePicture()

@@ -2,7 +2,7 @@ const CONFIG = {
     liffId: "2007130450-YVNvyNbL",
     googleMapsKey: "AIzaSyAw5sDr5qXKIpun2dp4jpu8NerbXy6Hfew",
     autoDestination: {
-        userId: 'Uc8695dc6e2569a960fe8912809a2e2ff', // ยอด
+        userId: 'Uc8695dc6e2569a960fe8912809a2e2ff',
         startTime: { hour: 16, minute: 40 },
         endTime: { hour: 17, minute: 20 },
         location: { lat: 14.975057297021436, lng: 102.11365790021132 }
@@ -38,8 +38,7 @@ function loadCarUsageState() {
     if (saved) {
         try {
             currentCarUsage = JSON.parse(saved);
-        } catch(e) {
-        }
+        } catch(e) {}
     }
 }
 
@@ -101,6 +100,41 @@ function startUsingCar(carPlate, carModel, userName, userId, mileage) {
     };
     saveCarUsageState();
     showCarInUseScreen();
+}
+
+async function processReturnCar(data) {
+    try {
+        await fetch('/update-return-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                carPlate: data.carPlate,
+                returnedAt: data.returnedAt,
+                durationText: data.durationText,
+                returnLocation: data.returnLocation
+            })
+        });
+    } catch (_) {}
+
+    currentCarUsage = {
+        isUsing: false,
+        carPlate: null,
+        startedAt: null,
+        userName: null,
+        userId: null,
+        carModel: null,
+        mileage: null
+    };
+    saveCarUsageState();
+
+    showNotification(`✅ คืนรถ ${data.carPlate} สำเร็จ`, 'success');
+
+    const carInUseScreen = document.getElementById('carInUseScreen');
+    if (carInUseScreen) carInUseScreen.style.display = 'none';
+
+    if (currentUser) {
+        showNormalUI(currentUser);
+    }
 }
 
 async function returnCarWithLocation(location) {
@@ -190,63 +224,32 @@ async function returnCarWithLocation(location) {
         }
     };
 
-    const carPlateSaved = currentCarUsage.carPlate;
+    // ✅ 1. เก็บข้อมูลลง localStorage ก่อนแชร์
+    const pendingReturn = {
+        action: 'return_car',
+        carPlate: currentCarUsage.carPlate,
+        returnedAt: returnTime.toISOString(),
+        durationText: durationText,
+        returnLocation: location,
+        timestamp: Date.now()
+    };
+    localStorage.setItem('pending_return', JSON.stringify(pendingReturn));
 
-    // ✅ 1. แชร์ก่อน (redirect ไป shareTargetPicker)
-    let shareSuccess = true;
+    // ✅ 2. เรียก shareTargetPicker → redirect ไปหน้าเลือกแชร์ LINE
     if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
         try {
             await liff.shareTargetPicker([shareMessage]);
-            shareSuccess = true;
         } catch (shareError) {
-            const errorMsg = String(shareError).toLowerCase();
-            shareSuccess = !(errorMsg.includes('cancel') || errorMsg.includes('abort'));
+            localStorage.removeItem('pending_return');
+            return false;
         }
-    }
-
-    // ✅ 2. กลับมาจากแชร์ → บันทึกข้อมูล (หน้าโหลดใหม่แล้วก็ยังทำงานได้)
-    if (shareSuccess) {
-        try {
-            await fetch('/update-return-status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    carPlate: currentCarUsage.carPlate,
-                    returnedAt: returnTime.toISOString(),
-                    durationText,
-                    returnLocation: location
-                })
-            });
-        } catch (_) {}
-
-        // ✅ 3. เปลี่ยน UI
-        currentCarUsage = {
-            isUsing: false,
-            carPlate: null,
-            startedAt: null,
-            userName: null,
-            userId: null,
-            carModel: null,
-            mileage: null
-        };
-        saveCarUsageState();
-
-        showNotification(`✅ คืนรถ ${carPlateSaved} สำเร็จ`, 'success');
-
-        const carInUseScreen = document.getElementById('carInUseScreen');
-        if (carInUseScreen) carInUseScreen.style.display = 'none';
-
-        if (currentUser) {
-            showNormalUI(currentUser);
-        } else {
-            location.reload();
-        }
-
-        return true;
     } else {
-        showNotification('❌ ยกเลิกการคืนรถ', 'warning');
-        return false;
+        localStorage.removeItem('pending_return');
+        await processReturnCar(pendingReturn);
+        return true;
     }
+
+    return true;
 }
 
 function showCarInUseScreen() {
@@ -1612,7 +1615,6 @@ document.getElementById('field-form')?.addEventListener('submit', async function
         };
 
         const sendData = async (photoBase64) => {
-            // ✅ 1. สร้าง Flex Message
             const message = createFlexMessage(
                 recordData.name,
                 recordData.phone,
@@ -1624,8 +1626,9 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 photoBase64
             );
 
-            // ✅ 2. เก็บข้อมูลลง localStorage เผื่อหน้าโหลดใหม่
+            // ✅ 1. เก็บข้อมูลลง localStorage ก่อนแชร์
             const pendingSave = {
+                action: 'save_record',
                 recordData: {
                     ...recordData,
                     hasPhoto: !!photoBase64,
@@ -1640,52 +1643,34 @@ document.getElementById('field-form')?.addEventListener('submit', async function
             };
             localStorage.setItem('pending_save', JSON.stringify(pendingSave));
 
-            // ✅ 3. แชร์ → redirect ไป shareTargetPicker
-            let shareSuccess = false;
-            let userCancelled = false;
-
+            // ✅ 2. เรียก shareTargetPicker → redirect ไปหน้าเลือกแชร์ LINE
             if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
                 try {
                     await liff.shareTargetPicker([message]);
-                    shareSuccess = true;
                 } catch (shareError) {
-                    const errorMsg = String(shareError).toLowerCase();
-                    if (errorMsg.includes('cancel') || errorMsg.includes('abort')) {
-                        userCancelled = true;
-                    } else {
-                        shareSuccess = true; // error อื่น → ถือว่าแชร์สำเร็จ
-                    }
-                }
-            } else {
-                showNotification('📤 Preview: กำลังบันทึกข้อมูล', 'info');
-                shareSuccess = true;
-            }
-
-            // ✅ 4. กลับมาจากแชร์ → บันทึกข้อมูล
-            if (shareSuccess) {
-                const saved = await saveToDatabase(pendingSave.recordData);
-                if (saved) {
+                    // ❌ ผู้ใช้กด cancel → ล้าง pending
                     localStorage.removeItem('pending_save');
-                    startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
-                    showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
-                    return true;
-                } else {
-                    showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
+                    showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
                     return false;
                 }
             } else {
+                // Preview mode → บันทึกเลย
                 localStorage.removeItem('pending_save');
-                if (userCancelled) {
-                    showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
+                const saved = await saveToDatabase(pendingSave.recordData);
+                if (saved) {
+                    startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
+                    showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
+                    return true;
                 }
                 return false;
             }
+
+            return true;
         };
 
         let result;
         if (photoFile) {
             updateMapStatus('กำลังอัปโหลดรูปภาพ...');
-
             const reader = new FileReader();
             result = await new Promise((resolve) => {
                 reader.onloadend = () => resolve(sendData(reader.result));
@@ -1716,16 +1701,15 @@ async function initializeApp() {
 
         loadCarUsageState();
 
-        // ✅ ตรวจสอบว่ามี pending save จากการแชร์ที่ยังไม่ได้บันทึกหรือไม่
+        // ✅ 1. ตรวจสอบ pending_save (บันทึกการใช้รถ)
         const pendingSave = localStorage.getItem('pending_save');
         if (pendingSave) {
             try {
                 const data = JSON.parse(pendingSave);
-                // ตรวจสอบว่าไม่เก่าเกิน 5 นาที
                 if (Date.now() - data.timestamp < 300000) {
+                    localStorage.removeItem('pending_save');
                     const saved = await saveToDatabase(data.recordData);
                     if (saved) {
-                        localStorage.removeItem('pending_save');
                         startUsingCar(data.carPlate, data.carModel, data.name, data.userId, data.mileage);
                         showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${data.carPlate}`, 'success');
                         showLoading(false);
@@ -1736,6 +1720,24 @@ async function initializeApp() {
                 }
             } catch (e) {
                 localStorage.removeItem('pending_save');
+            }
+        }
+
+        // ✅ 2. ตรวจสอบ pending_return (คืนรถ)
+        const pendingReturn = localStorage.getItem('pending_return');
+        if (pendingReturn) {
+            try {
+                const data = JSON.parse(pendingReturn);
+                if (Date.now() - data.timestamp < 300000) {
+                    localStorage.removeItem('pending_return');
+                    await processReturnCar(data);
+                    showLoading(false);
+                    return;
+                } else {
+                    localStorage.removeItem('pending_return');
+                }
+            } catch (e) {
+                localStorage.removeItem('pending_return');
             }
         }
 
@@ -1806,8 +1808,6 @@ async function initializeApp() {
         }
 
         const mapLoaded = await mapPromise;
-        if (!mapLoaded) {
-        }
 
         if (currentUser && currentUser.role !== 'pending' && currentUser.role !== 'inactive' && !currentCarUsage.isUsing) {
             setTimeout(() => {

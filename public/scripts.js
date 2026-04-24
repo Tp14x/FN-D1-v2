@@ -226,7 +226,7 @@ async function returnCarWithLocation(location) {
 
     const carPlateSaved = currentCarUsage.carPlate;
 
-    // ✅ ทางเลือกที่ 2: เรียก shareTargetPicker ก่อน (ยังเป็น gesture)
+    // ✅ เรียก shareTargetPicker ก่อน (ยังเป็น gesture)
     let shareSuccess = true;
     if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
         try {
@@ -240,7 +240,6 @@ async function returnCarWithLocation(location) {
 
     // ✅ กลับมาจาก picker → บันทึกข้อมูล + เปลี่ยน UI
     if (shareSuccess) {
-        // ✅ 1. บันทึกก่อน
         try {
             await fetch('/update-return-status', {
                 method: 'POST',
@@ -254,7 +253,6 @@ async function returnCarWithLocation(location) {
             });
         } catch (_) {}
 
-        // ✅ 2. เปลี่ยน UI
         currentCarUsage = {
             isUsing: false,
             carPlate: null,
@@ -271,7 +269,6 @@ async function returnCarWithLocation(location) {
         if (carInUseScreen) carInUseScreen.style.display = 'none';
         if (currentUser) showNormalUI(currentUser);
 
-        // ✅ 3. ปิด LIFF
         if (typeof liff !== 'undefined' && liff.isInClient()) {
             liff.closeWindow();
         }
@@ -352,7 +349,6 @@ function showCarInUseScreen() {
                 <p style="margin: 8px 0;"><strong>📍 ไมล์เริ่มต้น:</strong> ${currentCarUsage.mileage}</p>
             </div>
 
-            <!-- 📍 ส่วนแสดงตำแหน่งคืนรถ -->
             <div style="
                 background: #e8f5e9;
                 border-radius: 16px;
@@ -1580,9 +1576,7 @@ function resetForm() {
 document.getElementById('field-form')?.addEventListener('submit', async function(e) {
     e.preventDefault();
 
-    if (!canScanCar()) {
-        return;
-    }
+    if (!canScanCar()) return;
 
     if (currentUser && (currentUser.role === 'pending' || currentUser.role === 'inactive')) {
         showNotification('⚠️ ไม่สามารถบันทึกข้อมูลได้ เนื่องจากบัญชีของคุณยังไม่ได้รับการอนุมัติหรือถูกระงับ', 'warning');
@@ -1591,13 +1585,10 @@ document.getElementById('field-form')?.addEventListener('submit', async function
 
     const submitBtn = document.getElementById("submit-btn");
     if (!submitBtn) return;
-
     const originalText = submitBtn.innerHTML;
 
     try {
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังส่ง...';
-
+        // ✅ 1. อย่า disable ปุ่มก่อน shareTargetPicker
         const name = currentUser?.mappedName || currentUser?.displayName || 'ไม่ระบุชื่อ';
         const phone = currentUser?.phone || 'ไม่มีเบอร์';
         const car = document.getElementById("car")?.value;
@@ -1611,30 +1602,19 @@ document.getElementById('field-form')?.addEventListener('submit', async function
 
         const errors = validateForm(car, mileage, reason, markers);
         if (errors.length > 0) {
-            errors.forEach(error => {
-                showError(error.field, error.message);
-            });
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
+            errors.forEach(error => showError(error.field, error.message));
             return;
         }
 
         const recordData = {
             name: currentUser?.mappedName || 'ไม่ระบุชื่อ',
             phone: currentUser?.phone || 'ไม่มีเบอร์',
-            car,
-            mileage,
-            reason,
-            routeText,
+            car, mileage, reason, routeText,
             destinations: markers.map((m, i) => ({
-                point: i + 1,
-                lat: m.getPosition().lat(),
-                lng: m.getPosition().lng()
+                point: i + 1, lat: m.getPosition().lat(), lng: m.getPosition().lng()
             })),
-            totalDistance: routeText.includes('กม.') ?
-                parseFloat(routeText.split('กม.')[0].split(':')[1].trim()) : 0,
-            totalTime: routeText.includes('นาที') ?
-                parseInt(routeText.split('นาที')[0].split(':')[2].trim()) : 0,
+            totalDistance: routeText.includes('กม.') ? parseFloat(routeText.split('กม.')[0].split(':')[1].trim()) : 0,
+            totalTime: routeText.includes('นาที') ? parseInt(routeText.split('นาที')[0].split(':')[2].trim()) : 0,
             userId: currentUser?.userId || 'unknown',
             displayName: currentUser?.mappedName || 'ไม่ระบุชื่อ',
             timestamp: new Date().toISOString(),
@@ -1646,80 +1626,61 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                               )
         };
 
-        const sendData = async (photoBase64) => {
-            // ✅ 1. สร้าง Flex Message
-            const message = createFlexMessage(
-                recordData.name,
-                recordData.phone,
-                car,
-                mileage,
-                reason,
-                markers,
-                routeText,
-                photoBase64
-            );
-
-            // ✅ 2. เรียก shareTargetPicker ก่อน (ยังเป็น user gesture)
-            let shareSuccess = false;
-            if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
-                try {
-                    await liff.shareTargetPicker([message]);
-                    shareSuccess = true;
-                } catch (shareError) {
-                    const errorMsg = String(shareError).toLowerCase();
-                    if (errorMsg.includes('cancel') || errorMsg.includes('abort')) {
-                        shareSuccess = false;
-                    } else {
-                        shareSuccess = true;
-                    }
-                }
-            } else {
-                showNotification('📤 Preview: กำลังบันทึกข้อมูล', 'info');
-                shareSuccess = true;
-            }
-
-            // ✅ 3. กลับมาจาก picker → บันทึกข้อมูล + เปลี่ยน UI
-            if (shareSuccess) {
-                const recordWithPhoto = {
-                    ...recordData,
-                    hasPhoto: !!photoBase64,
-                    photoSize: photoBase64 ? photoBase64.length : 0
-                };
-
-                const saved = await saveToDatabase(recordWithPhoto);
-                if (saved) {
-                    startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
-                    showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
-                    return true;
-                } else {
-                    showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
-                    return false;
-                }
-            } else {
-                showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
-                return false;
-            }
-        };
-
-        let result;
+        // ✅ 2. อ่านรูปก่อน (ถ้ามี)
+        let photoBase64 = null;
         if (photoFile) {
-            updateMapStatus('กำลังอัปโหลดรูปภาพ...');
-
-            const reader = new FileReader();
-            result = await new Promise((resolve) => {
-                reader.onloadend = () => resolve(sendData(reader.result));
+            photoBase64 = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
                 reader.readAsDataURL(photoFile);
             });
+        }
+
+        // ✅ 3. สร้าง Flex Message
+        const message = createFlexMessage(
+            recordData.name, recordData.phone, car, mileage, reason,
+            markers, routeText, photoBase64
+        );
+
+        // ✅ 4. เรียก shareTargetPicker โดยตรง (ยังเป็น user gesture)
+        let shareSuccess = false;
+        if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
+            try {
+                await liff.shareTargetPicker([message]);
+                shareSuccess = true;
+            } catch (shareError) {
+                const errorMsg = String(shareError).toLowerCase();
+                shareSuccess = !(errorMsg.includes('cancel') || errorMsg.includes('abort'));
+            }
         } else {
-            result = await sendData(null);
+            showNotification('📤 Preview: กำลังบันทึกข้อมูล', 'info');
+            shareSuccess = true;
+        }
+
+        // ✅ 5. กลับมาจาก picker → disable ปุ่ม + บันทึกข้อมูล
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึก...';
+
+        if (shareSuccess) {
+            const recordWithPhoto = {
+                ...recordData,
+                hasPhoto: !!photoBase64,
+                photoSize: photoBase64 ? photoBase64.length : 0
+            };
+
+            const saved = await saveToDatabase(recordWithPhoto);
+            if (saved) {
+                startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
+                showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
+            } else {
+                showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
+            }
+        } else {
+            showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
         }
 
         submitBtn.disabled = false;
         submitBtn.innerHTML = originalText;
-
-        if (!result) {
-            showLoading(false);
-        }
 
     } catch (error) {
         updateMapStatus('❌ เกิดข้อผิดพลาด กรุณาลองใหม่', true);

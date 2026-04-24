@@ -104,7 +104,6 @@ function startUsingCar(carPlate, carModel, userName, userId, mileage) {
     showCarInUseScreen();
 }
 
-// ✅ ฟังก์ชันใหม่ ─ ยกเลิกการใช้รถ (กรณีค้าง)
 function cancelCarUsage() {
     if (confirm('คุณแน่ใจหรือไม่ว่าต้องการยกเลิกการใช้รถ? ข้อมูลการใช้รถนี้จะไม่ถูกบันทึก')) {
         currentCarUsage = {
@@ -253,15 +252,18 @@ async function returnCarWithLocation(location) {
     const carPlateSaved = currentCarUsage.carPlate;
 
     // ✅ เรียก shareTargetPicker ก่อน (ยังเป็น gesture)
-    let shareSuccess = true;
+    let shareSuccess = false;
     if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
         try {
             await liff.shareTargetPicker([shareMessage]);
             shareSuccess = true;
         } catch (shareError) {
-            const errorMsg = String(shareError).toLowerCase();
-            shareSuccess = !(errorMsg.includes('cancel') || errorMsg.includes('abort'));
+            // ❌ shareTargetPicker ไม่ทำงาน → ไม่บันทึก
+            shareSuccess = false;
         }
+    } else {
+        showNotification('📤 Preview: กำลังบันทึกข้อมูล', 'info');
+        shareSuccess = true;
     }
 
     // ✅ กลับมาจาก picker → บันทึกข้อมูล + เปลี่ยน UI
@@ -435,7 +437,6 @@ function showCarInUseScreen() {
                 คืนรถ (ต้องดึงตำแหน่งก่อน)
             </button>
 
-            <!-- ✅ ปุ่มยกเลิกการใช้รถ (กรณีค้าง) -->
             <button onclick="cancelCarUsage()" style="
                 background: #95a5a6;
                 color: white;
@@ -1692,34 +1693,37 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 await liff.shareTargetPicker([message]);
                 shareSuccess = true;
             } catch (shareError) {
-                const errorMsg = String(shareError).toLowerCase();
-                shareSuccess = !(errorMsg.includes('cancel') || errorMsg.includes('abort'));
+                // ❌ shareTargetPicker ไม่ทำงาน → ไม่บันทึก
+                console.error('shareTargetPicker error:', shareError);
+                shareSuccess = false;
             }
         } else {
             showNotification('📤 Preview: กำลังบันทึกข้อมูล', 'info');
             shareSuccess = true;
         }
 
+        // ✅ ถ้าแชร์ไม่สำเร็จ → แจ้งเตือนและหยุด
+        if (!shareSuccess) {
+            showNotification('❌ ไม่สามารถเปิดการแชร์ได้ กรุณาลองใหม่', 'error');
+            return;
+        }
+
         // ✅ กลับมาจาก picker → disable ปุ่ม + บันทึกข้อมูล
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึก...';
 
-        if (shareSuccess) {
-            const recordWithPhoto = {
-                ...recordData,
-                hasPhoto: !!photoBase64,
-                photoSize: photoBase64 ? photoBase64.length : 0
-            };
+        const recordWithPhoto = {
+            ...recordData,
+            hasPhoto: !!photoBase64,
+            photoSize: photoBase64 ? photoBase64.length : 0
+        };
 
-            const saved = await saveToDatabase(recordWithPhoto);
-            if (saved) {
-                startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
-                showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
-            } else {
-                showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
-            }
+        const saved = await saveToDatabase(recordWithPhoto);
+        if (saved) {
+            startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
+            showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
         } else {
-            showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
+            showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
         }
 
         submitBtn.disabled = false;

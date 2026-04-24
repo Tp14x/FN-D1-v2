@@ -258,7 +258,6 @@ async function returnCarWithLocation(location) {
             await liff.shareTargetPicker([shareMessage]);
             shareSuccess = true;
         } catch (shareError) {
-            // ❌ shareTargetPicker ไม่ทำงาน → ไม่บันทึก
             shareSuccess = false;
         }
     } else {
@@ -1693,8 +1692,9 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 await liff.shareTargetPicker([message]);
                 shareSuccess = true;
             } catch (shareError) {
-                // ❌ shareTargetPicker ไม่ทำงาน → ไม่บันทึก
-                console.error('shareTargetPicker error:', shareError);
+                const errorMsg = String(shareError).toLowerCase();
+                // ❌ ถ้า cancel → ไม่บันทึก
+                // ❌ ถ้า error อื่น → ไม่บันทึกเช่นกัน
                 shareSuccess = false;
             }
         } else {

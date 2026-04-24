@@ -52,15 +52,13 @@ function getCurrentLocation() {
             reject(new Error('เบราว์เซอร์นี้ไม่รองรับการดึงตำแหน่ง'));
             return;
         }
-
         navigator.geolocation.getCurrentPosition(
             (position) => {
-                const location = {
+                resolve({
                     lat: position.coords.latitude,
                     lng: position.coords.longitude,
                     accuracy: position.coords.accuracy
-                };
-                resolve(location);
+                });
             },
             (error) => {
                 let errorMessage = 'ไม่สามารถดึงตำแหน่งได้';
@@ -77,21 +75,15 @@ function getCurrentLocation() {
                 }
                 reject(new Error(errorMessage));
             },
-            {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
-            }
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
     });
 }
 
 function startUsingCar(carPlate, carModel, userName, userId, mileage) {
-    const fullCarPlate = carPlate;
-
     currentCarUsage = {
         isUsing: true,
-        carPlate: fullCarPlate,
+        carPlate: carPlate,
         carModel: carModel,
         startedAt: new Date().toISOString(),
         userName: userName,
@@ -201,52 +193,70 @@ async function returnCarWithLocation(location) {
                 contents: [
                     {
                         type: "button",
-                        action: {
-                            type: "uri",
-                            label: "🗺️ ดูตำแหน่งคืนรถ",
-                            uri: googleMapsLink
-                        },
-                        style: "link",
-                        color: "#3498db"
+                        action: { type: "uri", label: "🗺️ ดูตำแหน่งคืนรถ", uri: googleMapsLink },
+                        style: "link", color: "#3498db"
                     },
                     {
                         type: "button",
-                        action: {
-                            type: "uri",
-                            label: "📊 ดูประวัติการใช้รถ",
-                            uri: "https://car-log-history.netlify.app/"
-                        },
-                        style: "primary",
-                        color: "#2ECC71"
+                        action: { type: "uri", label: "📊 ดูประวัติการใช้รถ", uri: "https://car-log-history.netlify.app/" },
+                        style: "primary", color: "#2ECC71"
                     }
                 ]
             }
         }
     };
 
-    // ✅ 1. เก็บข้อมูลลง localStorage ก่อนแชร์
-    const pendingReturn = {
-        action: 'return_car',
-        carPlate: currentCarUsage.carPlate,
-        returnedAt: returnTime.toISOString(),
-        durationText: durationText,
-        returnLocation: location,
-        timestamp: Date.now()
-    };
-    localStorage.setItem('pending_return', JSON.stringify(pendingReturn));
+    const carPlateSaved = currentCarUsage.carPlate;
 
-    // ✅ 2. เรียก shareTargetPicker → redirect ไปหน้าเลือกแชร์ LINE
+    // ✅ 1. บันทึกข้อมูลการคืนรถก่อน
+    try {
+        await fetch('/update-return-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                carPlate: currentCarUsage.carPlate,
+                returnedAt: returnTime.toISOString(),
+                durationText,
+                returnLocation: location
+            })
+        });
+    } catch (_) {}
+
+    // ✅ 2. เปลี่ยน UI → กลับหน้าปกติ
+    currentCarUsage = {
+        isUsing: false,
+        carPlate: null,
+        startedAt: null,
+        userName: null,
+        userId: null,
+        carModel: null,
+        mileage: null
+    };
+    saveCarUsageState();
+
+    showNotification(`✅ คืนรถ ${carPlateSaved} สำเร็จ`, 'success');
+
+    const carInUseScreen = document.getElementById('carInUseScreen');
+    if (carInUseScreen) carInUseScreen.style.display = 'none';
+
+    if (currentUser) {
+        showNormalUI(currentUser);
+    }
+
+    // ✅ 3. แชร์
     if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
         try {
             await liff.shareTargetPicker([shareMessage]);
         } catch (shareError) {
-            localStorage.removeItem('pending_return');
-            return false;
+            // แชร์ไม่สำเร็จก็ไม่เป็นไร
         }
     } else {
-        localStorage.removeItem('pending_return');
-        await processReturnCar(pendingReturn);
-        return true;
+        showNotification('📤 Preview: คืนรถ', 'info');
+    }
+
+    // ✅ 4. ปิด LIFF
+    if (typeof liff !== 'undefined' && liff.isInClient()) {
+        liff.closeWindow();
     }
 
     return true;
@@ -653,9 +663,7 @@ async function callNetlifyFunction(functionName, data) {
     try {
         const response = await fetch(`/${functionName}`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
 
@@ -664,7 +672,6 @@ async function callNetlifyFunction(functionName, data) {
         }
 
         return await response.json();
-
     } catch (error) {
         return { success: false, error: error.message };
     }
@@ -673,11 +680,7 @@ async function callNetlifyFunction(functionName, data) {
 function showLoading(show = true) {
     const loading = document.getElementById("loading");
     if (loading) {
-        if (show) {
-            loading.classList.add("show");
-        } else {
-            loading.classList.remove("show");
-        }
+        loading.classList.toggle('show', show);
     }
 }
 
@@ -796,18 +799,9 @@ function updateMapStatus(message, isError = false) {
         if (icon && span) {
             icon.className = isError ? 'fas fa-exclamation-circle' : 'fas fa-info-circle';
             span.textContent = message;
-
-            if (isError) {
-                statusElement.classList.add('error');
-            } else {
-                statusElement.classList.remove('error');
-            }
-
+            statusElement.classList.toggle('error', isError);
             statusElement.classList.add('show');
-
-            setTimeout(() => {
-                statusElement.classList.remove('show');
-            }, 3000);
+            setTimeout(() => statusElement.classList.remove('show'), 3000);
         }
     }
 }
@@ -837,7 +831,6 @@ function showManualLoginForm() {
     if (userBadge) {
         userBadge.style.display = 'none';
     }
-
     updateMapStatus('⚠️ กำลังทำงานนอก LINE App', true);
 }
 
@@ -895,7 +888,6 @@ function showUserBadge(name, pictureUrl, department = 'Green Member') {
         userBadge.style.animation = 'none';
         userBadge.offsetHeight;
         userBadge.style.animation = 'slideRight 0.5s ease';
-
     }
 }
 
@@ -967,7 +959,6 @@ function showPendingMessage(userData, hasExistingRequest = false) {
 function updateUIForUser(userData) {
     if (userData.role === 'inactive' || userData.status === 'inactive') {
         showSuspendedMessage(userData.displayName);
-
     } else if (userData.role === 'pending' || userData.department === 'รออนุมัติ') {
         checkExistingRequest(userData.userId).then(hasRequest => {
             if (hasRequest) {
@@ -976,7 +967,6 @@ function updateUIForUser(userData) {
                 showRegistrationForm();
             }
         });
-
     } else {
         showNormalUI(userData);
     }
@@ -1014,11 +1004,8 @@ function centerMap() {
         map.panTo(originLatLng);
         map.setZoom(12);
         updateMapStatus('กลับไปยังจุดเริ่มต้น');
-
         const fabMenu = document.getElementById('fabMenu');
-        if (fabMenu) {
-            fabMenu.classList.remove('open');
-        }
+        if (fabMenu) fabMenu.classList.remove('open');
     }
 }
 
@@ -1028,11 +1015,8 @@ function clearAllMarkers() {
     updateSelectedDestinationsText();
     calculateRouteAndDistance();
     updateMapStatus('ล้างจุดหมายทั้งหมดแล้ว');
-
     const fabMenu = document.getElementById('fabMenu');
-    if (fabMenu) {
-        fabMenu.classList.remove('open');
-    }
+    if (fabMenu) fabMenu.classList.remove('open');
 }
 
 let mapType = 'roadmap';
@@ -1041,11 +1025,8 @@ function toggleMapType() {
         mapType = mapType === 'roadmap' ? 'satellite' : 'roadmap';
         map.setMapTypeId(mapType);
         updateMapStatus(`เปลี่ยนเป็นแผนที่แบบ ${mapType === 'roadmap' ? 'ถนน' : 'ดาวเทียม'}`);
-
         const fabMenu = document.getElementById('fabMenu');
-        if (fabMenu) {
-            fabMenu.classList.remove('open');
-        }
+        if (fabMenu) fabMenu.classList.remove('open');
     }
 }
 
@@ -1065,9 +1046,7 @@ function updateSelectedDestinationsText() {
 
 function calculateRouteAndDistance() {
     if (markers.length === 0) {
-        if (directionsRenderer) {
-            directionsRenderer.set('directions', null);
-        }
+        if (directionsRenderer) directionsRenderer.set('directions', null);
         const routeInfo = document.getElementById("routeInfo");
         if (routeInfo) {
             routeInfo.innerHTML = `
@@ -1089,7 +1068,7 @@ function calculateRouteAndDistance() {
     }));
 
     const destination = waypoints[waypoints.length - 1].location;
-    const midpoints = waypoints.slice(0, waypoints.length - 1);
+    const midpoints = waypoints.slice(0, -1);
 
     if (!directionsService || !directionsRenderer) return;
 
@@ -1172,30 +1151,21 @@ function createMarker(position) {
 }
 
 function checkAndAddAutoDestination(userData) {
-    if (!map || !markers) {
-        return false;
-    }
-
-    if (!userData || userData.userId !== CONFIG.autoDestination.userId) {
-        return false;
-    }
+    if (!map || !markers) return false;
+    if (!userData || userData.userId !== CONFIG.autoDestination.userId) return false;
 
     const now = new Date();
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
-
     const startTime = CONFIG.autoDestination.startTime;
     const endTime = CONFIG.autoDestination.endTime;
-
     const currentTotalMinutes = currentHour * 60 + currentMinute;
     const startTotalMinutes = startTime.hour * 60 + startTime.minute;
     const endTotalMinutes = endTime.hour * 60 + endTime.minute;
 
     if (currentTotalMinutes >= startTotalMinutes && currentTotalMinutes <= endTotalMinutes) {
-
         if (markers.length < 3) {
             const location = CONFIG.autoDestination.location;
-
             try {
                 const marker = createMarker(new google.maps.LatLng(location.lat, location.lng));
                 markers.push(marker);
@@ -1208,8 +1178,6 @@ function checkAndAddAutoDestination(userData) {
             } catch (error) {
                 return false;
             }
-        } else {
-            return false;
         }
     }
     return false;
@@ -1217,18 +1185,12 @@ function checkAndAddAutoDestination(userData) {
 
 function loadGoogleMaps() {
     return new Promise((resolve, reject) => {
-        if (window.google && window.google.maps) {
-            resolve();
-            return;
-        }
+        if (window.google && window.google.maps) { resolve(); return; }
 
         const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
         if (existingScript) {
             const checkInterval = setInterval(() => {
-                if (window.google && window.google.maps) {
-                    clearInterval(checkInterval);
-                    resolve();
-                }
+                if (window.google && window.google.maps) { clearInterval(checkInterval); resolve(); }
             }, 100);
             return;
         }
@@ -1237,20 +1199,12 @@ function loadGoogleMaps() {
         script.src = `https://maps.googleapis.com/maps/api/js?key=${CONFIG.googleMapsKey}&libraries=places&loading=async&callback=initMap`;
         script.async = true;
         script.defer = true;
-
         script.onload = () => {
             const checkGoogle = setInterval(() => {
-                if (window.google && window.google.maps) {
-                    clearInterval(checkGoogle);
-                    resolve();
-                }
+                if (window.google && window.google.maps) { clearInterval(checkGoogle); resolve(); }
             }, 100);
         };
-
-        script.onerror = () => {
-            reject(new Error('Failed to load Google Maps API'));
-        };
-
+        script.onerror = () => reject(new Error('Failed to load Google Maps API'));
         document.head.appendChild(script);
     });
 }
@@ -1261,29 +1215,18 @@ async function initMap() {
     try {
         showLoading(true);
         updateMapStatus('กำลังโหลดแผนที่...');
-
         await loadGoogleMaps();
 
-        if (!window.google || !window.google.maps) {
-            throw new Error('Google Maps API not loaded');
-        }
+        if (!window.google || !window.google.maps) throw new Error('Google Maps API not loaded');
 
         const mapElement = document.getElementById("map");
-        if (!mapElement) {
-            throw new Error('Map element not found');
-        }
+        if (!mapElement) throw new Error('Map element not found');
 
         map = new google.maps.Map(mapElement, {
             center: originLatLng,
             zoom: 12,
             mapTypeId: 'roadmap',
-            styles: [
-                {
-                    featureType: "poi",
-                    elementType: "labels",
-                    stylers: [{ visibility: "on" }]
-                }
-            ],
+            styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "on" }] }],
             mapTypeControl: false,
             fullscreenControl: false,
             streetViewControl: false
@@ -1292,17 +1235,11 @@ async function initMap() {
         directionsRenderer = new google.maps.DirectionsRenderer({
             map,
             suppressMarkers: true,
-            polylineOptions: {
-                strokeColor: '#2ECC71',
-                strokeWeight: 4
-            }
+            polylineOptions: { strokeColor: '#2ECC71', strokeWeight: 4 }
         });
 
         directionsService = new google.maps.DirectionsService();
-
-        await new Promise((resolve) => {
-            google.maps.event.addListenerOnce(map, 'tilesloaded', resolve);
-        });
+        await new Promise((resolve) => google.maps.event.addListenerOnce(map, 'tilesloaded', resolve));
 
         new google.maps.Marker({
             position: originLatLng,
@@ -1328,11 +1265,7 @@ async function initMap() {
                     updateMapStatus('ไม่พบพิกัดของสถานที่นี้', true);
                     return;
                 }
-
-                if (markers.length >= 3) {
-                    updateMapStatus('เลือกได้สูงสุด 3 จุด', true);
-                    return;
-                }
+                if (markers.length >= 3) { updateMapStatus('เลือกได้สูงสุด 3 จุด', true); return; }
 
                 const location = place.geometry.location;
                 const marker = createMarker(location);
@@ -1343,17 +1276,12 @@ async function initMap() {
                     calculateRouteAndDistance();
                     updateMapStatus(`เพิ่มจุดที่ ${markers.length}: ${place.name || 'สถานที่เลือก'}`);
                 }
-
                 searchInput.value = '';
             });
         }
 
         map.addListener("click", (e) => {
-            if (markers.length >= 3) {
-                updateMapStatus('เลือกได้สูงสุด 3 จุด', true);
-                return;
-            }
-
+            if (markers.length >= 3) { updateMapStatus('เลือกได้สูงสุด 3 จุด', true); return; }
             const marker = createMarker(e.latLng);
             if (marker) {
                 markers.push(marker);
@@ -1378,7 +1306,6 @@ async function initMap() {
 function createFlexMessage(name, phone, car, mileage, reason, markers, routeText, photoBase64) {
     const distanceMatch = routeText.match(/ระยะทางรวม:\s*([\d.]+)\s*กม/);
     const timeMatch = routeText.match(/เวลาโดยประมาณ:\s*(\d+)\s*นาที/);
-
     const distance = distanceMatch ? distanceMatch[1] : '0';
     const time = timeMatch ? timeMatch[1] : '0';
 
@@ -1391,16 +1318,7 @@ function createFlexMessage(name, phone, car, mileage, reason, markers, routeText
             header: {
                 type: "box",
                 layout: "vertical",
-                contents: [
-                    {
-                        type: "text",
-                        text: "🚗 บันทึกการใช้รถ",
-                        weight: "bold",
-                        size: "xl",
-                        color: "#FFFFFF",
-                        align: "center"
-                    }
-                ],
+                contents: [{ type: "text", text: "🚗 บันทึกการใช้รถ", weight: "bold", size: "xl", color: "#FFFFFF", align: "center" }],
                 backgroundColor: "#2ECC71",
                 paddingAll: "15px"
             },
@@ -1473,11 +1391,7 @@ function createFlexMessage(name, phone, car, mileage, reason, markers, routeText
                 contents: [
                     {
                         type: "button",
-                        action: {
-                            type: "uri",
-                            label: "📊 ดูประวัติการใช้งานรถ",
-                            uri: "https://car-log-history.netlify.app/"
-                        },
+                        action: { type: "uri", label: "📊 ดูประวัติการใช้งานรถ", uri: "https://car-log-history.netlify.app/" },
                         style: "primary",
                         color: "#2ECC71"
                     }
@@ -1491,16 +1405,10 @@ async function saveToDatabase(recordData) {
     try {
         const response = await fetch('/save-record', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(recordData)
-        }).catch(() => ({ ok: false }));
-
-        if (!response.ok) {
-            throw new Error('Network response was not ok');
-        }
-
+        });
+        if (!response.ok) throw new Error('Network response was not ok');
         const result = await response.json();
         return result.success;
     } catch (error) {
@@ -1510,47 +1418,35 @@ async function saveToDatabase(recordData) {
 
 function validateForm(car, mileage, reason, markers) {
     const errors = [];
-
     if (!car) errors.push({ field: 'car', message: 'กรุณาเลือกทะเบียนรถ' });
     if (!mileage || !/^\d+(\.\d{1,2})?$/.test(mileage)) errors.push({ field: 'mileage', message: 'กรุณากรอกเลขไมล์ให้ถูกต้อง' });
     if (!reason) errors.push({ field: 'reason', message: 'กรุณากรอกสาเหตุการใช้รถ' });
     if (markers.length === 0) errors.push({ field: 'destinations', message: 'กรุณาเลือกปลายทางอย่างน้อย 1 จุด' });
-
     return errors;
 }
 
 function closePopup() {
     const popup = document.getElementById("popupModal");
-    if (popup) {
-        popup.classList.remove("show");
-        setTimeout(() => {
-            resetForm();
-        }, 500);
-    }
+    if (popup) { popup.classList.remove("show"); setTimeout(resetForm, 500); }
 }
 
 function resetForm() {
     const form = document.getElementById("field-form");
     if (form) form.reset();
-
     clearPhoto();
-
     ['car', 'mileage', 'reason', 'destinations'].forEach(clearError);
-
     markers.forEach(marker => marker.setMap(null));
     markers = [];
     updateSelectedDestinationsText();
     calculateRouteAndDistance();
-
     updateMapStatus('ล้างข้อมูลเรียบร้อย');
 }
 
+// ==================== SUBMIT FORM ====================
 document.getElementById('field-form')?.addEventListener('submit', async function(e) {
     e.preventDefault();
 
-    if (!canScanCar()) {
-        return;
-    }
+    if (!canScanCar()) return;
 
     if (currentUser && (currentUser.role === 'pending' || currentUser.role === 'inactive')) {
         showNotification('⚠️ ไม่สามารถบันทึกข้อมูลได้ เนื่องจากบัญชีของคุณยังไม่ได้รับการอนุมัติหรือถูกระงับ', 'warning');
@@ -1559,7 +1455,6 @@ document.getElementById('field-form')?.addEventListener('submit', async function
 
     const submitBtn = document.getElementById("submit-btn");
     if (!submitBtn) return;
-
     const originalText = submitBtn.innerHTML;
 
     try {
@@ -1579,9 +1474,7 @@ document.getElementById('field-form')?.addEventListener('submit', async function
 
         const errors = validateForm(car, mileage, reason, markers);
         if (errors.length > 0) {
-            errors.forEach(error => {
-                showError(error.field, error.message);
-            });
+            errors.forEach(error => showError(error.field, error.message));
             submitBtn.disabled = false;
             submitBtn.innerHTML = originalText;
             return;
@@ -1599,10 +1492,8 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 lat: m.getPosition().lat(),
                 lng: m.getPosition().lng()
             })),
-            totalDistance: routeText.includes('กม.') ?
-                parseFloat(routeText.split('กม.')[0].split(':')[1].trim()) : 0,
-            totalTime: routeText.includes('นาที') ?
-                parseInt(routeText.split('นาที')[0].split(':')[2].trim()) : 0,
+            totalDistance: routeText.includes('กม.') ? parseFloat(routeText.split('กม.')[0].split(':')[1].trim()) : 0,
+            totalTime: routeText.includes('นาที') ? parseInt(routeText.split('นาที')[0].split(':')[2].trim()) : 0,
             userId: currentUser?.userId || 'unknown',
             displayName: currentUser?.mappedName || 'ไม่ระบุชื่อ',
             timestamp: new Date().toISOString(),
@@ -1615,6 +1506,24 @@ document.getElementById('field-form')?.addEventListener('submit', async function
         };
 
         const sendData = async (photoBase64) => {
+            // ✅ 1. บันทึกข้อมูลก่อน
+            const recordWithPhoto = {
+                ...recordData,
+                hasPhoto: !!photoBase64,
+                photoSize: photoBase64 ? photoBase64.length : 0
+            };
+
+            const saved = await saveToDatabase(recordWithPhoto);
+            if (!saved) {
+                showNotification('❌ บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่', 'error');
+                return false;
+            }
+
+            // ✅ 2. เปลี่ยน UI → หน้าคืนรถ
+            startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
+            showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
+
+            // ✅ 3. แชร์ (ปล่อยให้ redirect ได้เลย)
             const message = createFlexMessage(
                 recordData.name,
                 recordData.phone,
@@ -1626,43 +1535,14 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 photoBase64
             );
 
-            // ✅ 1. เก็บข้อมูลลง localStorage ก่อนแชร์
-            const pendingSave = {
-                action: 'save_record',
-                recordData: {
-                    ...recordData,
-                    hasPhoto: !!photoBase64,
-                    photoSize: photoBase64 ? photoBase64.length : 0
-                },
-                carPlate,
-                carModel,
-                name,
-                userId: currentUser?.userId,
-                mileage,
-                timestamp: Date.now()
-            };
-            localStorage.setItem('pending_save', JSON.stringify(pendingSave));
-
-            // ✅ 2. เรียก shareTargetPicker → redirect ไปหน้าเลือกแชร์ LINE
             if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
                 try {
                     await liff.shareTargetPicker([message]);
                 } catch (shareError) {
-                    // ❌ ผู้ใช้กด cancel → ล้าง pending
-                    localStorage.removeItem('pending_save');
-                    showNotification('❌ ยกเลิกการบันทึกข้อมูล', 'warning');
-                    return false;
+                    // แชร์ไม่สำเร็จก็ไม่เป็นไร ข้อมูลบันทึกแล้ว
                 }
             } else {
-                // Preview mode → บันทึกเลย
-                localStorage.removeItem('pending_save');
-                const saved = await saveToDatabase(pendingSave.recordData);
-                if (saved) {
-                    startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
-                    showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
-                    return true;
-                }
-                return false;
+                showNotification('📤 Preview: บันทึกข้อมูล', 'info');
             }
 
             return true;
@@ -1683,9 +1563,7 @@ document.getElementById('field-form')?.addEventListener('submit', async function
         submitBtn.disabled = false;
         submitBtn.innerHTML = originalText;
 
-        if (!result) {
-            showLoading(false);
-        }
+        if (!result) showLoading(false);
 
     } catch (error) {
         updateMapStatus('❌ เกิดข้อผิดพลาด กรุณาลองใหม่', true);
@@ -1698,10 +1576,9 @@ document.getElementById('field-form')?.addEventListener('submit', async function
 async function initializeApp() {
     try {
         showLoading(true);
-
         loadCarUsageState();
 
-        // ✅ 1. ตรวจสอบ pending_save (บันทึกการใช้รถ)
+        // ✅ ตรวจสอบ pending_save (กรณีกลับมาจาก shareTargetPicker)
         const pendingSave = localStorage.getItem('pending_save');
         if (pendingSave) {
             try {
@@ -1723,7 +1600,7 @@ async function initializeApp() {
             }
         }
 
-        // ✅ 2. ตรวจสอบ pending_return (คืนรถ)
+        // ✅ ตรวจสอบ pending_return
         const pendingReturn = localStorage.getItem('pending_return');
         if (pendingReturn) {
             try {
@@ -1742,17 +1619,13 @@ async function initializeApp() {
         }
 
         const env = checkEnvironment();
-
         const mapPromise = initMap();
 
         if (typeof liff !== 'undefined') {
             try {
                 await liff.init({ liffId: CONFIG.liffId });
 
-                if (!liff.isLoggedIn()) {
-                    liff.login();
-                    return;
-                }
+                if (!liff.isLoggedIn()) { liff.login(); return; }
 
                 const profile = await liff.getProfile();
                 const context = liff.getContext();
@@ -1771,20 +1644,17 @@ async function initializeApp() {
 
                 if (userMap && userMap[profile.userId]) {
                     const userFromJson = userMap[profile.userId];
-
                     userData.mappedName = userFromJson.name || profile.displayName;
                     userData.phone = userFromJson.phone || '';
                     userData.department = userFromJson.department || 'พนักงาน';
                     userData.role = userFromJson.role || 'user';
                     userData.status = userFromJson.status || 'active';
-
                 } else {
                     userData.mappedName = profile.displayName;
                     userData.phone = '';
                     userData.department = 'รออนุมัติ';
                     userData.role = 'pending';
                     userData.status = 'pending';
-
                 }
 
                 currentUser = userData;
@@ -1794,11 +1664,8 @@ async function initializeApp() {
                     updateUserProfilePicture()
                 ]);
 
-                if (currentCarUsage.isUsing) {
-                    showCarInUseScreen();
-                } else {
-                    updateUIForUser(userData);
-                }
+                if (currentCarUsage.isUsing) showCarInUseScreen();
+                else updateUIForUser(userData);
 
             } catch (liffError) {
                 showManualLoginForm();
@@ -1810,9 +1677,7 @@ async function initializeApp() {
         const mapLoaded = await mapPromise;
 
         if (currentUser && currentUser.role !== 'pending' && currentUser.role !== 'inactive' && !currentCarUsage.isUsing) {
-            setTimeout(() => {
-                checkAndAddAutoDestination(currentUser);
-            }, 2000);
+            setTimeout(() => checkAndAddAutoDestination(currentUser), 2000);
         }
 
         showLoading(false);
@@ -1834,10 +1699,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const preview = document.getElementById('preview');
             const removeBtn = document.querySelector('.remove-photo');
 
-            if (!file) {
-                clearPhoto();
-                return;
-            }
+            if (!file) { clearPhoto(); return; }
 
             const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
             const maxSize = 5 * 1024 * 1024;
@@ -1864,13 +1726,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const reader = new FileReader();
             reader.onload = (event) => {
-                if (preview) {
-                    preview.src = event.target.result;
-                    preview.classList.add("show");
-                }
-                if (removeBtn) {
-                    removeBtn.style.display = 'flex';
-                }
+                if (preview) { preview.src = event.target.result; preview.classList.add("show"); }
+                if (removeBtn) removeBtn.style.display = 'flex';
                 if (photoInfo) {
                     photoInfo.innerHTML = `<i class="fas fa-check-circle"></i> เลือกไฟล์: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
                     photoInfo.style.color = '#2ECC71';
@@ -1882,37 +1739,28 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     const removePhotoBtn = document.querySelector('.remove-photo');
-    if (removePhotoBtn) {
-        removePhotoBtn.addEventListener('click', clearPhoto);
-    }
+    if (removePhotoBtn) removePhotoBtn.addEventListener('click', clearPhoto);
 
     const mileage = document.getElementById('mileage');
     if (mileage) {
         mileage.addEventListener('input', (e) => {
             const value = e.target.value;
-            if (value && !/^\d+(\.\d{0,2})?$/.test(value)) {
-                showError('mileage', 'กรุณากรอกเลขไมล์ให้ถูกต้อง');
-            } else {
-                clearError('mileage');
-            }
+            if (value && !/^\d+(\.\d{0,2})?$/.test(value)) showError('mileage', 'กรุณากรอกเลขไมล์ให้ถูกต้อง');
+            else clearError('mileage');
         });
     }
 
     const reason = document.getElementById('reason');
     if (reason) {
         reason.addEventListener('input', (e) => {
-            if (e.target.value.trim()) {
-                clearError('reason');
-            }
+            if (e.target.value.trim()) clearError('reason');
         });
     }
 
     const carSelect = document.getElementById('car');
     if (carSelect) {
         carSelect.addEventListener('change', (e) => {
-            if (e.target.value) {
-                clearError('car');
-            }
+            if (e.target.value) clearError('car');
         });
     }
 
@@ -1924,9 +1772,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     const otherDeptGroup = document.getElementById('reg-other-dept')?.parentElement?.parentElement;
-    if (otherDeptGroup) {
-        otherDeptGroup.style.display = 'none';
-    }
+    if (otherDeptGroup) otherDeptGroup.style.display = 'none';
 
     document.getElementById('reg-department')?.addEventListener('change', function(e) {
         const otherDeptGroup = document.getElementById('reg-other-dept').parentElement.parentElement;
@@ -1955,37 +1801,12 @@ document.getElementById('register-form')?.addEventListener('submit', async funct
         const department = document.getElementById('reg-department').value;
         const otherDept = document.getElementById('reg-other-dept').value.trim();
 
-        if (!fullName) {
-            showError('reg-name', 'กรุณากรอกชื่อ-นามสกุล');
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
-            return;
-        }
+        if (!fullName) { showError('reg-name', 'กรุณากรอกชื่อ-นามสกุล'); submitBtn.disabled = false; submitBtn.innerHTML = originalText; return; }
+        if (!phone || !/^[0-9]{10}$/.test(phone)) { showError('reg-phone', 'กรุณากรอกเบอร์โทรศัพท์ 10 หลัก'); submitBtn.disabled = false; submitBtn.innerHTML = originalText; return; }
+        if (!department) { showError('reg-department', 'กรุณาเลือกแผนก'); submitBtn.disabled = false; submitBtn.innerHTML = originalText; return; }
+        if (department === 'อื่นๆ' && !otherDept) { showError('reg-other-dept', 'กรุณาระบุแผนก'); submitBtn.disabled = false; submitBtn.innerHTML = originalText; return; }
 
-        if (!phone || !/^[0-9]{10}$/.test(phone)) {
-            showError('reg-phone', 'กรุณากรอกเบอร์โทรศัพท์ 10 หลัก');
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
-            return;
-        }
-
-        if (!department) {
-            showError('reg-department', 'กรุณาเลือกแผนก');
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
-            return;
-        }
-
-        if (department === 'อื่นๆ' && !otherDept) {
-            showError('reg-other-dept', 'กรุณาระบุแผนก');
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
-            return;
-        }
-
-        if (!currentUser || !currentUser.userId) {
-            throw new Error('ไม่พบข้อมูลผู้ใช้');
-        }
+        if (!currentUser || !currentUser.userId) throw new Error('ไม่พบข้อมูลผู้ใช้');
 
         const formData = {
             fullName,
@@ -1994,17 +1815,9 @@ document.getElementById('register-form')?.addEventListener('submit', async funct
             otherDepartment: department === 'อื่นๆ' ? otherDept : null
         };
 
-        const result = await submitRegistration(
-            currentUser.userId,
-            currentUser.displayName,
-            currentUser.pictureUrl,
-            formData
-        );
+        const result = await submitRegistration(currentUser.userId, currentUser.displayName, currentUser.pictureUrl, formData);
 
-        if (!result) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
-        }
+        if (!result) { submitBtn.disabled = false; submitBtn.innerHTML = originalText; }
 
     } catch (error) {
         showNotification('เกิดข้อผิดพลาด: ' + error.message, 'error');

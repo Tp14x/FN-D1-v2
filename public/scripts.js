@@ -222,7 +222,23 @@ async function returnCarWithLocation(location) {
         });
     } catch (_) {}
 
-    // ✅ 2. เปลี่ยน UI → กลับหน้าปกติ
+    // ✅ 2. แชร์ก่อนเปลี่ยน UI (แก้ Bug #1 และ #4)
+    if (typeof liff !== 'undefined' && liff.isLoggedIn() && liff.isApiAvailable('shareTargetPicker')) {
+        try {
+            await liff.shareTargetPicker([shareMessage]);
+        } catch (shareError) {
+            // แก้ Bug #3: log error จริงๆ แทนที่จะกลืนเงียบ
+            console.error('shareTargetPicker (return) error:', shareError);
+            showNotification('⚠️ แชร์ไม่สำเร็จ: ' + shareError.message, 'warning');
+        }
+    } else if (typeof liff !== 'undefined' && liff.isLoggedIn() && !liff.isApiAvailable('shareTargetPicker')) {
+        console.warn('shareTargetPicker is not available for this LIFF ID');
+        showNotification('⚠️ ฟีเจอร์แชร์ไม่ได้เปิดใช้งาน กรุณาตรวจสอบ LIFF settings', 'warning');
+    } else {
+        showNotification('📤 Preview: คืนรถ', 'info');
+    }
+
+    // ✅ 3. เปลี่ยน UI หลังแชร์
     currentCarUsage = {
         isUsing: false,
         carPlate: null,
@@ -243,18 +259,7 @@ async function returnCarWithLocation(location) {
         showNormalUI(currentUser);
     }
 
-    // ✅ 3. แชร์
-    if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
-        try {
-            await liff.shareTargetPicker([shareMessage]);
-        } catch (shareError) {
-            // แชร์ไม่สำเร็จก็ไม่เป็นไร
-        }
-    } else {
-        showNotification('📤 Preview: คืนรถ', 'info');
-    }
-
-    // ✅ 4. ปิด LIFF
+    // ✅ 4. ปิด LIFF หลังสุด
     if (typeof liff !== 'undefined' && liff.isInClient()) {
         liff.closeWindow();
     }
@@ -1519,11 +1524,7 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 return false;
             }
 
-            // ✅ 2. เปลี่ยน UI → หน้าคืนรถ
-            startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
-            showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
-
-            // ✅ 3. แชร์ (ปล่อยให้ redirect ได้เลย)
+            // ✅ 2. แชร์ก่อน (แก้ Bug #1: เปลี่ยน order — shareTargetPicker ก่อน startUsingCar)
             const message = createFlexMessage(
                 recordData.name,
                 recordData.phone,
@@ -1535,15 +1536,25 @@ document.getElementById('field-form')?.addEventListener('submit', async function
                 photoBase64
             );
 
-            if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
+            if (typeof liff !== 'undefined' && liff.isLoggedIn() && liff.isApiAvailable('shareTargetPicker')) {
+                // แก้ Bug #2: เช็ค isApiAvailable ก่อนเรียก
                 try {
                     await liff.shareTargetPicker([message]);
                 } catch (shareError) {
-                    // แชร์ไม่สำเร็จก็ไม่เป็นไร ข้อมูลบันทึกแล้ว
+                    // แก้ Bug #3: log error จริงๆ แทนที่จะกลืนเงียบ
+                    console.error('shareTargetPicker (save) error:', shareError);
+                    showNotification('⚠️ แชร์ไม่สำเร็จ: ' + shareError.message, 'warning');
                 }
+            } else if (typeof liff !== 'undefined' && liff.isLoggedIn() && !liff.isApiAvailable('shareTargetPicker')) {
+                console.warn('shareTargetPicker is not available for this LIFF ID');
+                showNotification('⚠️ ฟีเจอร์แชร์ไม่ได้เปิดใช้งาน กรุณาตรวจสอบ LIFF settings', 'warning');
             } else {
                 showNotification('📤 Preview: บันทึกข้อมูล', 'info');
             }
+
+            // ✅ 3. เปลี่ยน UI → หน้าคืนรถ หลังแชร์เสร็จ (แก้ Bug #1)
+            startUsingCar(carPlate, carModel, name, currentUser?.userId, mileage);
+            showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${carPlate}`, 'success');
 
             return true;
         };
@@ -1578,45 +1589,8 @@ async function initializeApp() {
         showLoading(true);
         loadCarUsageState();
 
-        // ✅ ตรวจสอบ pending_save (กรณีกลับมาจาก shareTargetPicker)
-        const pendingSave = localStorage.getItem('pending_save');
-        if (pendingSave) {
-            try {
-                const data = JSON.parse(pendingSave);
-                if (Date.now() - data.timestamp < 300000) {
-                    localStorage.removeItem('pending_save');
-                    const saved = await saveToDatabase(data.recordData);
-                    if (saved) {
-                        startUsingCar(data.carPlate, data.carModel, data.name, data.userId, data.mileage);
-                        showNotification(`✅ บันทึกสำเร็จ! กำลังใช้รถ ${data.carPlate}`, 'success');
-                        showLoading(false);
-                        return;
-                    }
-                } else {
-                    localStorage.removeItem('pending_save');
-                }
-            } catch (e) {
-                localStorage.removeItem('pending_save');
-            }
-        }
-
-        // ✅ ตรวจสอบ pending_return
-        const pendingReturn = localStorage.getItem('pending_return');
-        if (pendingReturn) {
-            try {
-                const data = JSON.parse(pendingReturn);
-                if (Date.now() - data.timestamp < 300000) {
-                    localStorage.removeItem('pending_return');
-                    await processReturnCar(data);
-                    showLoading(false);
-                    return;
-                } else {
-                    localStorage.removeItem('pending_return');
-                }
-            } catch (e) {
-                localStorage.removeItem('pending_return');
-            }
-        }
+        // หมายเหตุ: ลบ dead code ของ pending_save และ pending_return ออก (Bug #5)
+        // เนื่องจากไม่มีที่ใดในระบบเขียนค่าเหล่านี้ลง localStorage จึงไม่มีทางทำงานได้
 
         const env = checkEnvironment();
         const mapPromise = initMap();
